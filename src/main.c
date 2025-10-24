@@ -51,7 +51,7 @@ int main()
 	printf("\n请输入结束 SNR (dB): ");
 	scanf("%f", &finish);
 	printf("\n请输入要仿真的消息帧数: ");
-	scanf("%d", &seq_num);
+	scanf("%ld", &seq_num);
 
     printf("=================================================================\n");
     #if DECODER_TYPE == 1
