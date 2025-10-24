@@ -8,8 +8,8 @@ int codeword[codeword_length];
 int re_codeword[codeword_length];
 int de_message[message_length];
 
-double tx_symbol[codeword_length][2];
-double rx_symbol[codeword_length][2];
+double tx_symbol[codeword_length][softIn_st_num];
+double rx_symbol[codeword_length][softIn_st_num];
 
 
 /**
@@ -64,7 +64,7 @@ void channel()
 
 	for (i = 0; i<codeword_length; i++)
 	{
-		for (j = 0; j<2; j++) // 对 I, Q 两路加噪声 (虽然Q路是0)
+		for (j = 0; j<softIn_st_num; j++) // 对 I, Q 两路加噪声 (虽然Q路是0)
 		{
             // Box-Muller 变换生成高斯分布
 			u = (double)rand() / (double)RAND_MAX;

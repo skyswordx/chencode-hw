@@ -124,9 +124,7 @@ void softDecode(double re_codewordSoft[][softIn_st_num], int de_message[], int m
             double ideal_x2 = (nowCode2 == 0) ? 1.0 : -1.0;
 
             // 计算欧氏距离的平方 (Squared Euclidean Distance)
-            // (省略 sqrt 计算更快，且不影响大小比较)
             euDistance += pow(re_codewordSoft[2 * t][0] - ideal_x1, 2);
-            // rx_symbol 的 [1] (Q路) 理论上是0，但也可能包含噪声
             euDistance += pow(re_codewordSoft[2 * t][1] - 0.0, 2); 
             euDistance += pow(re_codewordSoft[2 * t + 1][0] - ideal_x2, 2);
             euDistance += pow(re_codewordSoft[2 * t + 1][1] - 0.0, 2);
@@ -136,7 +134,6 @@ void softDecode(double re_codewordSoft[][softIn_st_num], int de_message[], int m
     }
 
     // 2. 加-比-选 (ACS)
-    // (与硬判决的逻辑完全相同，只是数据类型变为 double)
     double path1d, path2d, minpath;
     pathTableSoft[0][0] = 0;
     for (int fst = 1; fst < st_num; fst++) { pathTableSoft[0][fst] = inf_double; }
@@ -165,7 +162,6 @@ void softDecode(double re_codewordSoft[][softIn_st_num], int de_message[], int m
     }
 
     // 3. 回溯 (Traceback)
-    // (与硬判决完全相同)
     int nowLine = 0, nowPoint = 0, prevPoint = 0;
     for (int tt = ms_length; tt > 0; tt--)
     {
@@ -176,7 +172,6 @@ void softDecode(double re_codewordSoft[][softIn_st_num], int de_message[], int m
     }
 
     // 4. 输出译码消息
-    // (与硬判决完全相同)
     for (int t = 0; t < ms_length; t++)
     {
         de_message[t] = stateTable[minPath[t] - 1].input;
