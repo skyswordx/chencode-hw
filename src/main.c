@@ -35,7 +35,7 @@ void run_cc_simulation(float start_snr, float finish_snr, long int seq_num)
 	double progress;
 
     // CC 码率 (仅计算信息比特)
-    code_rate = (float)MESSAGE_BITS / (float)codeword_length;
+    code_rate = (float)CC_MESSAGE_BITS / (float)CC_codeword_length;
 
     printf("=================================================================\n");
     #if DECODER_TYPE == 1
@@ -61,12 +61,12 @@ void run_cc_simulation(float start_snr, float finish_snr, long int seq_num)
 		for (seq = 1; seq <= seq_num; seq++)
 		{
 			// 1. 随机生成二进制消息
-			for (i = 0; i < MESSAGE_BITS; i++)
+			for (i = 0; i < CC_MESSAGE_BITS; i++)
 			{
 				message[i] = rand() % 2;
 			}
             // 2. 补零 (尾比特)，用于 trellis 终止
-			for (i = MESSAGE_BITS; i < message_length; i++)
+			for (i = CC_MESSAGE_BITS; i < CC_message_length; i++)
 			{
 				message[i] = 0;
 			}
@@ -90,19 +90,19 @@ void run_cc_simulation(float start_snr, float finish_snr, long int seq_num)
 
 			// 8. 计算误比特数
             // 只比较 MESSAGE_BITS 个信息比特，不比较尾比特
-			for (i = 0; i < MESSAGE_BITS; i++)
+			for (i = 0; i < CC_MESSAGE_BITS; i++)
 			{
 				if (message[i] != de_message[i])
 					bit_error++;
 			}
 
 			progress = (double)(seq * 100) / (double)seq_num; 
-			BER = (double)bit_error / (double)(MESSAGE_BITS * seq);
+			BER = (double)bit_error / (double)(CC_MESSAGE_BITS * seq);
 
 			printf("进度=%5.1f%%, SNR=%4.1f dB, 误比特=%8ld, BER=%E\r", progress, SNR, bit_error, BER);
 		}
 
-		BER = (double)bit_error / (double)(MESSAGE_BITS * seq_num);
+		BER = (double)bit_error / (double)(CC_MESSAGE_BITS * seq_num);
 		printf("进度=100.0%%, SNR=%4.1f dB, 误比特=%8ld, BER=%E\n", SNR, bit_error, BER);
 	}
 }
@@ -166,13 +166,13 @@ void statetable()
 void decoder()
 { 
     #if DECODER_TYPE == 1
-        hardDecoder(re_codeword, de_message, message_length);
+        hardDecoder(re_codeword, de_message, CC_message_length);
     
     #elif DECODER_TYPE == 2
-        softDecode(rx_symbol, de_message, message_length);
+        softDecode(rx_symbol, de_message, CC_message_length);
     
     #elif DECODER_TYPE == 3
-        BCJR(rx_symbol, de_message, message_length, codeword_length);
+        BCJR(rx_symbol, de_message, CC_message_length, CC_codeword_length);
     
     #else
        // Turbo 码不使用此函数

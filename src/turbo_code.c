@@ -82,22 +82,21 @@ void deinterleave_llr(double* in, double* out) {
 
 /**
  * @brief 分量编码器 (RSC)
- * G = [1, (1+D^2)/(1+D+D^2)] (7,5 码的 RSC 形式)
- * 反馈: f = m[i] ^ s0 ^ s1
- * 校验: c = m[i] ^ s1 (即 G_par = 1+D^2)
- *
- * (为了匹配 trellis.c 中的 (7,5) 网格图，我们使用)
- * G = [1, (1+D^2)/(1+D+D^2)]
- * 反馈: f = m[i] ^ s0 ^ s1
- * 校验: c = m[i] ^ s1
- * s1_next = s0
- * s0_next = f
+ * (7,5)_8 RSC G = [1, (1+D^2)/(1+D+D^2)]
+ * 状态 s = (s0, s1)  <-- 注意：为了匹配我们推导的RSC网格图，s0是D, s1是D^2
+ * 反馈: f = m[i] ^ s0 ^ s1   (来自 1+D+D^2)
+ * 校验: c = f ^ s1         (来自 1+D^2) <-- [BUG 1 已修复]
+ * 状态更新: s1_next = s0, s0_next = f
  */
 void component_rsc_encoder(int* input_msg, int* output_parity) {
     int s0 = 0, s1 = 0;
     for (int i = 0; i < TURBO_message_length; i++) {
         int f = input_msg[i] ^ s0 ^ s1; // 反馈 (来自 1+D+D^2)
-        output_parity[i] = input_msg[i] ^ s1; // 校验 (来自 1+D^2)
+        
+        // ** [BUG 1 修复] **
+        // 错误代码: output_parity[i] = input_msg[i] ^ s1;
+        // 校验位必须由反馈位 f 产生，而不是输入位 m
+        output_parity[i] = f ^ s1;      // 校验 (来自 1+D^2)
         
         s1 = s0;
         s0 = f;
@@ -116,13 +115,14 @@ void turbo_encoder() {
     interleave_bits(turbo_message_padded, interleaved_msg);
 
     // 2. 编码器 1 (非交织)
+    // G_rsc_1 = [1, (1+D^2)/(1+D+D^2)]
     component_rsc_encoder(turbo_message_padded, parity1);
 
     // 3. 编码器 2 (交织)
+    // G_rsc_2 = [1, (1+D^2)/(1+D+D^2)]
     component_rsc_encoder(interleaved_msg, parity2);
 
     // 4. 码字复用 [u, c1, c2]
-    // (注意：尾比特处理)
     int k = 0;
     for (int i = 0; i < TURBO_MESSAGE_BITS; i++) {
         turbo_codeword[k++] = turbo_message_padded[i]; // u
@@ -169,8 +169,6 @@ void turbo_channel() {
 void turbo_decoder_wrapper() {
     
     // 1. 计算信道 LLR
-    // Lc = 2*y / sgm^2 = 4*y / N0
-    // (因为 y 是 +/- 1, 接收到的是 r, Lc = 4*r/N0)
     double Lc_factor = 4.0 / N0;
     int k = 0;
     for (int i = 0; i < TURBO_MESSAGE_BITS; i++) {
@@ -180,7 +178,12 @@ void turbo_decoder_wrapper() {
     }
     // 尾比特的 LLR
     for (int i = TURBO_MESSAGE_BITS; i < TURBO_message_length; i++) {
-        Lc_sys[i] = 0; // 尾比特的系统信息为 0 (高可信度)
+        // ** [ 尝试修复 ] **
+        // 将尾比特 LLR 从 100.0 降低到 20.0，观察是否能解决高 SNR 溢出
+        // Lc_sys[i] = 100.0; // 原值
+        Lc_sys[i] = 20.0;  // 新值 (仍然代表高可信度 u=0)
+        // ** [ 修复结束 ] **
+        
         Lc_par1[i] = Lc_factor * turbo_rx_symbol[k++][0];
         Lc_par2[i] = Lc_factor * turbo_rx_symbol[k++][0];
     }
@@ -190,42 +193,26 @@ void turbo_decoder_wrapper() {
         La_2_to_1[i] = 0.0;
     }
 
-    // 3. 迭代译码
+    // 3. 迭代译码 (保持不变)
     for (int iter = 0; iter < TURBO_ITERATIONS; iter++) {
-        
-        // --- 译码器 1 ---
-        // 输入: Lc(u), Lc(c1), La(u) from Dec2
         log_map_decoder(Lc_sys, Lc_par1, La_2_to_1, Le_1);
-        
-        // --- 交织 ---
-        // Le_1 -> La_1_to_2
         interleave_llr(Le_1, La_1_to_2);
-        
-        // --- 译码器 2 ---
-        // 输入: Lc(u'), Lc(c2), La(u') from Dec1
-        // (需要交织 Lc_sys)
         double Lc_sys_interleaved[TURBO_message_length];
         interleave_llr(Lc_sys, Lc_sys_interleaved);
-        
         log_map_decoder(Lc_sys_interleaved, Lc_par2, La_1_to_2, Le_2);
-
-        // --- 解交织 ---
-        // Le_2 -> La_2_to_1
         deinterleave_llr(Le_2, La_2_to_1);
     }
 
-    // 4. 最终判决
-    // L_APP(u) = Lc(u) + La(u) + Le(u)
+    // 4. 最终判决 (保持不变)
     for (int i = 0; i < TURBO_MESSAGE_BITS; i++) {
         L_APP[i] = Lc_sys[i] + La_2_to_1[i] + Le_1[i];
         if (L_APP[i] > 0.0) {
-            turbo_de_message[i] = 0; // LLR > 0, 判为 0
+            turbo_de_message[i] = 0;
         } else {
-            turbo_de_message[i] = 1; // LLR < 0, 判为 1
+            turbo_de_message[i] = 1;
         }
     }
 }
-
 /**
  * @brief 随机生成 Turbo 码消息
  */

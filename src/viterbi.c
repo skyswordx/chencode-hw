@@ -4,13 +4,13 @@
 
 // --- Viterbi 译码器所需的全局数组 ---
 // 存放分支度量和路径度量
-int branchTable[message_length][line_num];    // 分支度量表 (硬判决：汉明距离)
-int pathTable[message_length + 1][st_num];  // 路径度量表 (累加度量)
-int trellisTable[message_length][st_num];   // 幸存路径表 (存储 trellis 转移)
-int minPath[message_length];                // 最终译码路径
+int branchTable[CC_message_length][line_num];    // 分支度量表 (硬判决：汉明距离)
+int pathTable[CC_message_length + 1][st_num];  // 路径度量表 (累加度量)
+int trellisTable[CC_message_length][st_num];   // 幸存路径表 (存储 trellis 转移)
+int minPath[CC_message_length];                // 最终译码路径
 
-double branchTableSoft[message_length][line_num]; // 分支度量表 (软判决：欧氏距离)
-double pathTableSoft[message_length + 1][st_num];// 路径度量表 (软判决：累加度量)
+double branchTableSoft[CC_message_length][line_num]; // 分支度量表 (软判决：欧氏距离)
+double pathTableSoft[CC_message_length + 1][st_num];// 路径度量表 (软判决：累加度量)
 
 
 /**

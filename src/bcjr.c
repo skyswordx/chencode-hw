@@ -4,10 +4,10 @@
 
 // --- BCJR 译码器所需的全局数组 ---
 // 存放前向、后向和分支概率
-double pCh[codeword_length][2];     // 信道观察概率 P(y|x) [x=0 或 x=1]
-double pLine[message_length][line_num]; // 分支转移概率 Gamma
-double pA[message_length + 1][st_num];  // 前向概率 Alpha
-double pB[message_length + 1][st_num];  // 后向概率 Beta
+double pCh[CC_codeword_length][2];     // 信道观察概率 P(y|x) [x=0 或 x=1]
+double pLine[CC_message_length][line_num]; // 分支转移概率 Gamma
+double pA[CC_message_length + 1][st_num];  // 前向概率 Alpha
+double pB[CC_message_length + 1][st_num];  // 后向概率 Beta
 
 
 /**

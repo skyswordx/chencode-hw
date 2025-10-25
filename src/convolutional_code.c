@@ -3,13 +3,13 @@
 #include "trellis.h" // 需要 trellis.h 里的 N0/sgm
 
 // --- 全局数组定义 ---
-int message[message_length];
-int codeword[codeword_length];
-int re_codeword[codeword_length];
-int de_message[message_length];
+int message[CC_message_length];
+int codeword[CC_codeword_length];
+int re_codeword[CC_codeword_length];
+int de_message[CC_message_length];
 
-double tx_symbol[codeword_length][softIn_st_num];
-double rx_symbol[codeword_length][softIn_st_num];
+double tx_symbol[CC_codeword_length][softIn_st_num];
+double rx_symbol[CC_codeword_length][softIn_st_num];
 
 
 /**
@@ -27,7 +27,7 @@ void encoder()
     int c1, c2;
     int s0 = 0; // 寄存器 1 (D)
     int s1 = 0; // 寄存器 2 (D^2)
-    for (int i = 0; i < message_length; i++)
+    for (int i = 0; i < CC_message_length; i++)
     {
         c1 = message[i] ^ s0 ^ s1; // G_c1 = 1 + D + D^2
         c2 = message[i] ^ s1;      // G_c2 = 1 + D^2
@@ -47,7 +47,7 @@ void modulation()
 	int i;
 	// 0 映射到 (1, 0)
 	// 1 映射到 (-1, 0)
-	for (i = 0; i<codeword_length; i++)
+	for (i = 0; i<CC_codeword_length; i++)
 	{
 		tx_symbol[i][0] = -1.0 * (2.0 * codeword[i] - 1.0); // 0->1, 1->-1
 		tx_symbol[i][1] = 0.0;
@@ -62,7 +62,7 @@ void channel()
 	int i, j;
 	double u, r, g;
 
-	for (i = 0; i<codeword_length; i++)
+	for (i = 0; i<CC_codeword_length; i++)
 	{
 		for (j = 0; j<softIn_st_num; j++) // 对 I, Q 两路加噪声 (虽然Q路是0)
 		{
@@ -87,7 +87,7 @@ void demodulation()
 {
 	int i;
 	double d1, d2;
-	for (i = 0; i<codeword_length; i++)
+	for (i = 0; i<CC_codeword_length; i++)
 	{
         // 0 对应 +1, 1 对应 -1
 		// d1 = 接收符号到 +1 (即 0) 的欧氏距离的平方
