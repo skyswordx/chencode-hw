@@ -14,14 +14,17 @@ double turbo_tx_symbol[TURBO_codeword_length][2]; // 发送符号
 double turbo_rx_symbol[TURBO_codeword_length][2]; // 接收符号
 
 // LLR 数组
-double Lc_sys[TURBO_message_length];  // 信道 LLR (系统比特)
-double Lc_par1[TURBO_message_length]; // 信道 LLR (校验比特1)
-double Lc_par2[TURBO_message_length]; // 信道 LLR (校验比特2)
-double La_1_to_2[TURBO_message_length]; // 解码器1 -> 2 的先验信息
-double La_2_to_1[TURBO_message_length]; // 解码器2 -> 1 的先验信息
-double Le_1[TURBO_message_length];    // 解码器1 的外在信息
-double Le_2[TURBO_message_length];    // 解码器2 的外在信息
-double L_APP[TURBO_message_length];   // 最终的后验 LLR
+double Lc_sys[TURBO_message_length];
+double Lc_par1[TURBO_message_length];
+double Lc_par2[TURBO_message_length];
+double La_1_to_2[TURBO_message_length];
+double La_2_to_1[TURBO_message_length];
+double Le_1[TURBO_message_length];
+double Le_2[TURBO_message_length];
+double L_APP[TURBO_message_length];
+// extern double turbo_rx_symbol[TURBO_codeword_length][2];
+// extern int turbo_de_message[TURBO_MESSAGE_BITS];
+
 
 // 全局信道参数 (在 Turbo 循环中设置)
 extern double N0;
@@ -169,43 +172,71 @@ void turbo_channel() {
 void turbo_decoder_wrapper() {
     
     // 1. 计算信道 LLR
+    // 对于 BPSK + AWGN, LLR = 4 * y / N0
     double Lc_factor = 4.0 / N0;
     int k = 0;
+    
+    // 读取数据部分
     for (int i = 0; i < TURBO_MESSAGE_BITS; i++) {
         Lc_sys[i]  = Lc_factor * turbo_rx_symbol[k++][0];
         Lc_par1[i] = Lc_factor * turbo_rx_symbol[k++][0];
         Lc_par2[i] = Lc_factor * turbo_rx_symbol[k++][0];
     }
-    // 尾比特的 LLR
+    
+    // 读取尾比特部分
+    // 由于我们在 log_map_decoder 中修正了 Beta 初始化（不做归零假设），
+    // 这里的 LLR 应该如实反映信道接收值，而不需要人为设为 20.0 或 100.0。
+    // 尾比特仅仅是“已知为0的数据位”。
     for (int i = TURBO_MESSAGE_BITS; i < TURBO_message_length; i++) {
-        // ** [ 尝试修复 ] **
-        // 将尾比特 LLR 从 100.0 降低到 20.0，观察是否能解决高 SNR 溢出
-        // Lc_sys[i] = 100.0; // 原值
-        Lc_sys[i] = 20.0;  // 新值 (仍然代表高可信度 u=0)
-        // ** [ 修复结束 ] **
+        // 方式 A: 如果发送端补了0，这就是强先验信息。
+        // 可以给它加上一个大的 Bias，或者直接用信道值（因为发送的是0，接收值均值会是+1）。
+        // 最稳健的做法：加上强先验 (因为我们确定发送的是0)
+        // 但在迭代中，这部分由 decoder 处理。
+        // 这里直接使用接收值即可，因为我们发送的是确定的 0，接收值正向偏离会很大。
+        // 为了进一步辅助译码，可以手动增强这部分的 LLR，告诉译码器“我很确定这是0”
+        
+        // 原来的接收 LLR
+        double rx_llr = Lc_factor * turbo_rx_symbol[k++][0];
+        // 叠加“已知是0”的先验 (Soft Termination)
+        Lc_sys[i] = rx_llr + 500.0; 
         
         Lc_par1[i] = Lc_factor * turbo_rx_symbol[k++][0];
         Lc_par2[i] = Lc_factor * turbo_rx_symbol[k++][0];
     }
 
-    // 2. 初始化先验信息
+    // 2. 初始化先验信息 (全部清零)
     for (int i = 0; i < TURBO_message_length; i++) {
         La_2_to_1[i] = 0.0;
+        La_1_to_2[i] = 0.0; // 确保两个方向都清零
     }
 
-    // 3. 迭代译码 (保持不变)
+    // 3. 迭代译码
     for (int iter = 0; iter < TURBO_ITERATIONS; iter++) {
+        // --- 分量译码器 1 ---
         log_map_decoder(Lc_sys, Lc_par1, La_2_to_1, Le_1);
+        
+        // 交织外在信息，作为 DEC2 的先验
         interleave_llr(Le_1, La_1_to_2);
+        
+        // 系统位信道信息也需要交织，对应 DEC2 的输入顺序
         double Lc_sys_interleaved[TURBO_message_length];
         interleave_llr(Lc_sys, Lc_sys_interleaved);
+        
+        // --- 分量译码器 2 ---
         log_map_decoder(Lc_sys_interleaved, Lc_par2, La_1_to_2, Le_2);
+        
+        // 解交织外在信息，作为 DEC1 的先验 (下一轮)
         deinterleave_llr(Le_2, La_2_to_1);
     }
 
-    // 4. 最终判决 (保持不变)
+    // 4. 最终判决
+    // L_APP = Lc + La + Le (取 DEC1 的视角)
+    // 注意：这里 La_2_to_1 就是来自 DEC2 的外在信息(解交织后)，充当 DEC1 的先验
+    // Le_1 是 DEC1 根据自身结构产生的外在信息
     for (int i = 0; i < TURBO_MESSAGE_BITS; i++) {
         L_APP[i] = Lc_sys[i] + La_2_to_1[i] + Le_1[i];
+        
+        // LLR > 0 判为 0, LLR < 0 判为 1
         if (L_APP[i] > 0.0) {
             turbo_de_message[i] = 0;
         } else {
@@ -213,6 +244,7 @@ void turbo_decoder_wrapper() {
         }
     }
 }
+
 /**
  * @brief 随机生成 Turbo 码消息
  */

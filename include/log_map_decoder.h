@@ -18,7 +18,6 @@ double jac_log(double a, double b);
  * @param Lc_par    [in]  校验比特的信道 LLR
  * @param La_in     [in]  先验信息 LLR (来自另一个译码器)
  * @param Le_out    [out] 外在信息 LLR (发送给另一个译码器)
- * @param trellis   [in]  所使用的网格图定义 (用于 RSC)
  */
 void log_map_decoder(double* Lc_sys, double* Lc_par, double* La_in, double* Le_out);
 
