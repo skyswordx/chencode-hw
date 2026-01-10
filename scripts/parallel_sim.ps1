@@ -33,6 +33,10 @@ param(
     [ValidateRange(0, 4)]
     [int]$Decoder,
     
+    [Parameter(Mandatory=$false)]
+    [ValidateRange(0, 1)]
+    [int]$TurboType = 0,  # 0=(7,5)_8, 1=CCSDS
+    
     [Parameter(Mandatory=$true)]
     [float]$StartSNR,
     
@@ -222,7 +226,7 @@ function Merge-CSVFiles {
         "# Total Frames per SNR: $TotalFrames",
         "# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
         "#",
-        "Eb_N0,Bit_Errors,Total_Bits,BER"
+        "Eb_N0,Bit_Errors,Total_Bits,BER,Frame_Errors,Total_Frames,FER"
     )
     
     $header | Out-File -FilePath $OutputFile -Encoding UTF8
@@ -296,7 +300,12 @@ for ($i = 0; $i -lt $actualWorkers; $i++) {
     
     $seed = 10000 + $i * 1000 + (Get-Random -Maximum 999)
     
-    $cmdArgs = "--batch --decoder $Decoder --snr $($chunk.StartSNR) $($chunk.EndSNR) $Step --frames $Frames --output `"$outFile`" --seed $seed --quiet"
+    # Build command arguments (include --turbo-type for Turbo decoder)
+    $turboArg = ""
+    if ($Decoder -eq 4) {
+        $turboArg = " --turbo-type $TurboType"
+    }
+    $cmdArgs = "--batch --decoder $Decoder$turboArg --snr $($chunk.StartSNR) $($chunk.EndSNR) $Step --frames $Frames --output `"$outFile`" --seed $seed --quiet"
     
     $proc = Start-Process -FilePath $ExePath -ArgumentList $cmdArgs -PassThru -WindowStyle Hidden
     $processes += $proc

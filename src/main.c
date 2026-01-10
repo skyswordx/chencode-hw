@@ -97,6 +97,29 @@ int get_decoder_choice(void) {
     return choice;
 }
 
+int get_turbo_type_choice(void) {
+    printf("\n");
+    printf("  ================================================================\n");
+    printf("                     Select Turbo Code Variant\n");
+    printf("  ================================================================\n");
+    printf("\n");
+    printf("    [0]  (7,5)_8 4-state    Custom RSC (K=1024 bits)\n");
+    printf("    [1]  CCSDS  16-state    NASA Standard (K=1784 bits)\n");
+    printf("\n");
+    printf("  ================================================================\n");
+    
+    int choice = -1;
+    while (choice < 0 || choice > 1) {
+        printf("  Select Turbo variant [0-1]: ");
+        if (scanf("%d", &choice) != 1) {
+            while (getchar() != '\n');
+            choice = -1;
+            printf("  [Error] Please enter 0 or 1\n");
+        }
+    }
+    return choice;
+}
+
 void get_snr_range(float* start, float* end, float* step) {
     printf("\n  Enter SNR range (in dB)\n");
     
@@ -142,6 +165,7 @@ typedef struct {
     int batch_mode;         // 1 if --batch flag is present
     int quiet_mode;         // 1 if --quiet flag is present  
     int decoder;            // Decoder type (0-4)
+    int turbo_type;         // Turbo variant (0=(7,5)_8, 1=CCSDS)
     float start_snr;
     float end_snr;
     float step;
@@ -156,13 +180,14 @@ void print_usage(const char* prog_name) {
     printf("  %s --batch [options]        Batch mode for parallel execution\n\n", prog_name);
     printf("Batch mode options:\n");
     printf("  --decoder <0-4>     Decoder type (0=Uncoded, 1=HardViterbi, 2=SoftViterbi, 3=BCJR, 4=Turbo)\n");
+    printf("  --turbo-type <0-1>  Turbo variant (0=(7,5)_8 K=1024, 1=CCSDS K=1784)\n");
     printf("  --snr <start> <end> <step>   SNR range in dB\n");
     printf("  --frames <N>        Number of frames per SNR point\n");
     printf("  --output <file>     Output CSV file path\n");
     printf("  --seed <N>          Random seed (default: time-based)\n");
     printf("  --quiet             Suppress console output (for parallel execution)\n");
     printf("\nExample:\n");
-    printf("  %s --batch --decoder 4 --snr -1.0 4.0 0.5 --frames 50000 --output output/part_0.csv --quiet\n\n", prog_name);
+    printf("  %s --batch --decoder 4 --turbo-type 1 --snr -0.5 1.5 0.1 --frames 10000 --output ccsds.csv\n\n", prog_name);
 }
 
 int parse_cli_args(int argc, char* argv[], CLIArgs* args) {
@@ -184,6 +209,9 @@ int parse_cli_args(int argc, char* argv[], CLIArgs* args) {
         }
         else if (strcmp(argv[i], "--decoder") == 0 && i + 1 < argc) {
             args->decoder = atoi(argv[++i]);
+        }
+        else if (strcmp(argv[i], "--turbo-type") == 0 && i + 1 < argc) {
+            args->turbo_type = atoi(argv[++i]);
         }
         else if (strcmp(argv[i], "--snr") == 0 && i + 3 < argc) {
             args->start_snr = (float)atof(argv[++i]);
@@ -247,6 +275,11 @@ int main(int argc, char* argv[]) {
         // Set global decoder type
         g_decoder_type = (DecoderType)cli_args.decoder;
         
+        // Set Turbo type if decoder is Turbo
+        if (g_decoder_type == DECODER_TURBO) {
+            g_turbo_type = (TurboType)cli_args.turbo_type;
+        }
+        
         // Fill simulation config
         SimConfig cfg = {0};
         cfg.start_snr = cli_args.start_snr;
@@ -284,6 +317,12 @@ int main(int argc, char* argv[]) {
         print_menu();
         int decoder_choice = get_decoder_choice();
         g_decoder_type = (DecoderType)decoder_choice;
+        
+        // If Turbo selected, ask for variant
+        if (g_decoder_type == DECODER_TURBO) {
+            int turbo_choice = get_turbo_type_choice();
+            g_turbo_type = (TurboType)turbo_choice;
+        }
         
         // Get SNR range
         float start_snr, end_snr, snr_step;

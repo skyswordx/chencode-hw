@@ -6,6 +6,7 @@
 #include "viterbi.h"
 #include "bcjr.h"
 #include "turbo_code.h"
+#include "ccsds_turbo.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +14,9 @@
 
 // 全局译码器类型变量定义
 DecoderType g_decoder_type = DECODER_SOFT_VITERBI;
+
+// 全局 Turbo 类型变量定义
+TurboType g_turbo_type = TURBO_TYPE_75_OCT;  // 默认为原有 (7,5)_8 实现
 
 // 外部变量声明
 extern double N0;
@@ -25,9 +29,26 @@ extern double sgm;
 void print_sim_header(DecoderType decoder, SimConfig* cfg) {
     const char* decoder_name = DECODER_NAMES[decoder];
     
-    int block_size = (decoder == DECODER_TURBO) ? TURBO_MESSAGE_BITS : CC_MESSAGE_BITS;
-    double code_rate = (decoder == DECODER_TURBO) ? (1.0/3.0) : 
-                       (decoder == DECODER_UNCODED) ? 1.0 : 0.5;
+    int block_size;
+    double code_rate;
+    const char* turbo_variant = "";
+    
+    if (decoder == DECODER_TURBO) {
+        if (g_turbo_type == TURBO_TYPE_CCSDS) {
+            block_size = CCSDS_K;
+            turbo_variant = " (CCSDS)";
+        } else {
+            block_size = TURBO_MESSAGE_BITS;
+            turbo_variant = " ((7,5)_8)";
+        }
+        code_rate = 1.0 / 3.0;
+    } else if (decoder == DECODER_UNCODED) {
+        block_size = CC_MESSAGE_BITS;
+        code_rate = 1.0;
+    } else {
+        block_size = CC_MESSAGE_BITS;
+        code_rate = 0.5;
+    }
     
     printf("\n");
     printf("+============================================================+\n");
@@ -304,7 +325,7 @@ void run_simulation(DecoderType decoder, SimConfig* cfg) {
             break;
         case DECODER_TURBO:
             code_rate = 1.0 / 3.0;
-            block_size = TURBO_MESSAGE_BITS;
+            block_size = (g_turbo_type == TURBO_TYPE_CCSDS) ? CCSDS_K : TURBO_MESSAGE_BITS;
             break;
         default:
             code_rate = 0.5;
@@ -337,7 +358,11 @@ void run_simulation(DecoderType decoder, SimConfig* cfg) {
             run_cc_simulation_v2(decoder, cfg, csv_fp);
             break;
         case DECODER_TURBO:
-            run_turbo_simulation_v2(cfg, csv_fp);
+            if (g_turbo_type == TURBO_TYPE_CCSDS) {
+                run_ccsds_turbo_simulation(cfg, csv_fp);  // CCSDS 16-state
+            } else {
+                run_turbo_simulation_v2(cfg, csv_fp);     // Original (7,5)_8
+            }
             break;
         default:
             fprintf(stderr, "[错误] 未知译码器类型: %d\n", decoder);

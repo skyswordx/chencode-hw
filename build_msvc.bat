@@ -22,7 +22,7 @@ del /Q *.obj 2>nul
 del /Q *.exe 2>nul
 
 REM Set source files
-set SOURCES=src\main.c src\convolutional_code.c src\trellis.c src\viterbi.c src\bcjr.c src\log_map_decoder.c src\turbo_code.c src\sim_runner.c src\csv_export.c
+set SOURCES=src\main.c src\convolutional_code.c src\trellis.c src\viterbi.c src\bcjr.c src\log_map_decoder.c src\turbo_code.c src\ccsds_turbo.c src\sim_runner.c src\csv_export.c
 
 REM Set compiler flags
 REM /nologo  - Suppress copyright message

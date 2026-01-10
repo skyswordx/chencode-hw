@@ -21,6 +21,17 @@ typedef enum {
 extern DecoderType g_decoder_type;
 
 // =================================================================
+// --- Turbo 码变体选择 ---
+// =================================================================
+typedef enum {
+    TURBO_TYPE_75_OCT = 0,    // (7,5)_8 4-state RSC (原有实现, K=1024)
+    TURBO_TYPE_CCSDS = 1      // CCSDS 16-state RSC (NASA标准, K=1784)
+} TurboType;
+
+// 全局 Turbo 类型变量 (在 sim_runner.c 中定义)
+extern TurboType g_turbo_type;
+
+// =================================================================
 // --- 算法常量 ---
 // =================================================================
 #define INF_INT 1000000        // Viterbi 硬判决的"无穷大"
@@ -55,12 +66,23 @@ extern DecoderType g_decoder_type;
 #define CC_codeword_length (CC_message_length * 2)      // 码字长度 (R=1/2)
 
 // =================================================================
-// --- Turbo 码仿真参数 ---
+// --- Turbo 码仿真参数 (原有 (7,5)_8 实现) ---
 // =================================================================
 #define TURBO_MESSAGE_BITS 1024    // Turbo 码：核心信息比特数 (K)
 #define TURBO_message_length (TURBO_MESSAGE_BITS + STATE_MEM) // 补零后长度
 #define TURBO_codeword_length (TURBO_MESSAGE_BITS * 3 + STATE_MEM * 4) // R≈1/3
 #define TURBO_ITERATIONS 8         // Turbo 码：译码器迭代次数
+
+// =================================================================
+// --- CCSDS Turbo 码参数 (NASA 标准 16-state) ---
+// =================================================================
+#define CCSDS_ST_NUM 16            // CCSDS: 16 状态 (2^4)
+#define CCSDS_LINE_NUM 32          // CCSDS: 32 条转移边
+#define CCSDS_STATE_MEM 4          // CCSDS: 记忆深度 m=4
+#define CCSDS_K 1784               // CCSDS: 信息比特数 (初始仅支持1784)
+#define CCSDS_message_length (CCSDS_K + CCSDS_STATE_MEM)
+#define CCSDS_codeword_length (CCSDS_K * 3 + CCSDS_STATE_MEM * 4)
+#define CCSDS_ITERATIONS 8         // CCSDS: 译码器迭代次数
 
 // =================================================================
 // --- 译码器名称字符串 ---
