@@ -2,8 +2,10 @@
  * @file ccsds_turbo.c
  * @brief CCSDS 131.0-B-5 Turbo Code Implementation (NASA Standard)
  * 
- * 16-state RSC encoder, K=1784, Rate 1/3
+ * 16-state RSC encoder, Dynamic K support (1784/3568/7136/8920), Rate 1/3
  * Polynomials: G0=10011 (feedback), G1=11011 (feedforward)
+ * 
+ * Interleaver: Exact CCSDS 131.0-B-5 algorithmic permutation
  */
 
 #include "ccsds_turbo.h"
@@ -16,109 +18,163 @@
 #include <math.h>
 
 // =================================================================
-// --- CCSDS 全局数组 ---
+// --- 运行时 K 值 (全局变量) ---
 // =================================================================
-static int ccsds_message[CCSDS_K];                    // 原始消息
-static int ccsds_message_padded[CCSDS_message_length]; // 补零后的消息
-static int ccsds_interleaver[CCSDS_K];                // 交织器
-static int ccsds_codeword[CCSDS_codeword_length];     // 编码后的码字
-static int ccsds_de_message[CCSDS_K];                 // 最终译码消息
+int g_ccsds_k = CCSDS_K_1784;  // 默认 K=1784
 
-static double ccsds_tx_symbol[CCSDS_codeword_length][2]; // 发送符号
-static double ccsds_rx_symbol[CCSDS_codeword_length][2]; // 接收符号
+// 运行时计算的派生值
+static int ccsds_message_length;   // K + 4
+static int ccsds_codeword_length;  // K*3 + 16
+
+// =================================================================
+// --- CCSDS 全局数组 (使用最大尺寸静态分配) ---
+// =================================================================
+static int ccsds_message[CCSDS_K_MAX];                       // 原始消息
+static int ccsds_message_padded[CCSDS_message_length_max];   // 补零后的消息
+static int ccsds_interleaver[CCSDS_K_MAX];                   // 交织器
+static int ccsds_codeword[CCSDS_codeword_length_max];        // 编码后的码字
+static int ccsds_de_message[CCSDS_K_MAX];                    // 最终译码消息
+
+static double ccsds_tx_symbol[CCSDS_codeword_length_max][2]; // 发送符号
+static double ccsds_rx_symbol[CCSDS_codeword_length_max][2]; // 接收符号
 
 // LLR 数组
-static double ccsds_Lc_sys[CCSDS_message_length];
-static double ccsds_Lc_par1[CCSDS_message_length];
-static double ccsds_Lc_par2[CCSDS_message_length];
-static double ccsds_La_1_to_2[CCSDS_message_length];
-static double ccsds_La_2_to_1[CCSDS_message_length];
-static double ccsds_Le_1[CCSDS_message_length];
-static double ccsds_Le_2[CCSDS_message_length];
-static double ccsds_L_APP[CCSDS_message_length];
+static double ccsds_Lc_sys[CCSDS_message_length_max];
+static double ccsds_Lc_par1[CCSDS_message_length_max];
+static double ccsds_Lc_par2[CCSDS_message_length_max];
+static double ccsds_La_1_to_2[CCSDS_message_length_max];
+static double ccsds_La_2_to_1[CCSDS_message_length_max];
+static double ccsds_Le_1[CCSDS_message_length_max];
+static double ccsds_Le_2[CCSDS_message_length_max];
+static double ccsds_L_APP[CCSDS_message_length_max];
 
 // 信道参数
 extern double N0;
 extern double sgm;
 
 // =================================================================
-// --- CCSDS 交织器参数 (K=1784) ---
+// --- CCSDS 交织器参数 (131.0-B-5 标准) ---
 // =================================================================
-// CCSDS 标准使用的 8 个质数
-static const int CCSDS_PRIMES[8] = {31, 37, 43, 47, 53, 59, 61, 67};
+// CCSDS 标准使用的 8 个质数 (1-indexed in algorithm, 0-indexed here for array access)
+static const int CCSDS_PRIMES[9] = {0, 31, 37, 43, 47, 53, 59, 61, 67};
 
-// K=1784 的参数: k1=8, k2=223
-#define CCSDS_k1 8
-#define CCSDS_k2 223
+// K 值对应的 (k1, k2) 参数表
+typedef struct {
+    int k;
+    int k1;
+    int k2;
+} CcsdsKParams;
+
+static const CcsdsKParams CCSDS_K_TABLE[] = {
+    {1784, 8, 223},   // 223 = 223 * 1
+    {3568, 8, 446},   // 446 = 223 * 2
+    {7136, 8, 892},   // 892 = 223 * 4
+    {8920, 8, 1115},  // 1115 = 223 * 5
+};
+#define CCSDS_K_TABLE_SIZE (sizeof(CCSDS_K_TABLE) / sizeof(CCSDS_K_TABLE[0]))
 
 /**
- * @brief 生成 CCSDS 确定性交织器 (K=1784)
+ * @brief 获取 K 对应的 k1, k2 参数
+ */
+static int ccsds_get_k_params(int k, int* k1, int* k2) {
+    for (int i = 0; i < CCSDS_K_TABLE_SIZE; i++) {
+        if (CCSDS_K_TABLE[i].k == k) {
+            *k1 = CCSDS_K_TABLE[i].k1;
+            *k2 = CCSDS_K_TABLE[i].k2;
+            return 1;
+        }
+    }
+    return 0;  // 未找到
+}
+
+/**
+ * @brief 设置 CCSDS K 值
+ * @param k 信息块长度 (1784, 3568, 7136, 8920)
+ * @return 1 成功, 0 失败
+ */
+int ccsds_set_block_size(int k) {
+    int k1, k2;
+    if (!ccsds_get_k_params(k, &k1, &k2)) {
+        fprintf(stderr, "[CCSDS] Error: Unsupported K=%d\n", k);
+        return 0;
+    }
+    
+    g_ccsds_k = k;
+    ccsds_message_length = k + CCSDS_STATE_MEM;
+    ccsds_codeword_length = k * 3 + CCSDS_STATE_MEM * 4;
+    
+    printf("[CCSDS] Block size set: K=%d (k1=%d, k2=%d)\n", k, k1, k2);
+    return 1;
+}
+
+/**
+ * @brief 生成 CCSDS 131.0-B-5 确定性交织器
  * 
- * 算法基于 CCSDS 131.0-B-5 标准:
- * π(s) = (k1 * s + k2 * P(s) + T(s)) mod K
- * 其中 P(s) 和 T(s) 由质数组按特定规则计算
+ * 算法来自 CCSDS 131.0-B-5 Section 6.3g:
+ * 对于 s = 1, 2, ..., K:
+ *   m = (s - 1) mod 2
+ *   i = floor((s - 1) / (2 * k2))
+ *   j = floor((s - 1) / 2) - i * k2
+ *   t = (19 * i + 1) mod (k1 / 2)
+ *   q = (t mod 8) + 1
+ *   c = (p[q] * j + 21 * m) mod k2
+ *   pi(s) = 2 * (t + c * (k1 / 2) + 1) - m
  */
 void ccsds_turbo_init(void) {
-    // K=1784 = 8 * 223
-    // 根据 CCSDS 标准, 对于 K=1784:
-    // π(s) 的计算较为复杂，这里使用简化实现
+    int K = g_ccsds_k;
+    int k1, k2;
     
-    // 临时使用 S-random 交织器作为近似 (性能接近但非标准)
-    // TODO: 实现完整的 CCSDS 交织器算法
+    // 更新派生值
+    ccsds_message_length = K + CCSDS_STATE_MEM;
+    ccsds_codeword_length = K * 3 + CCSDS_STATE_MEM * 4;
     
-    // 初始化为顺序
-    for (int i = 0; i < CCSDS_K; i++) {
-        ccsds_interleaver[i] = i;
+    if (!ccsds_get_k_params(K, &k1, &k2)) {
+        fprintf(stderr, "[CCSDS] Error: Cannot initialize interleaver for K=%d\n", K);
+        return;
     }
     
-    // S-random interleaver with S = sqrt(K/2) ≈ 30
-    int S = 30;
-    for (int i = CCSDS_K - 1; i > 0; i--) {
-        int valid = 0;
-        int j, attempts = 0;
+    int k1_half = k1 / 2;  // k1/2 = 4
+    
+    // 生成交织表 (CCSDS 131.0-B-5 算法)
+    for (int s = 1; s <= K; s++) {
+        int m = (s - 1) % 2;
+        int i = (s - 1) / (2 * k2);
+        int j = ((s - 1) / 2) - (i * k2);
         
-        while (!valid && attempts < 1000) {
-            j = rand() % (i + 1);
-            valid = 1;
-            
-            // 检查 S-random 约束
-            for (int k = 1; k <= S && valid; k++) {
-                if (i + k < CCSDS_K) {
-                    if (abs(ccsds_interleaver[j] - ccsds_interleaver[i + k]) < S) {
-                        valid = 0;
-                    }
-                }
-                if (i - k >= 0) {
-                    if (abs(ccsds_interleaver[j] - ccsds_interleaver[i - k]) < S) {
-                        valid = 0;
-                    }
-                }
-            }
-            attempts++;
-        }
+        int t = (19 * i + 1) % k1_half;
+        int q = (t % 8) + 1;  // 1-indexed prime selector
+        int c = (CCSDS_PRIMES[q] * j + 21 * m) % k2;
         
-        // 如果找不到合适的位置，使用随机位置
-        if (!valid) {
-            j = rand() % (i + 1);
-        }
+        int pi_s = 2 * (t + c * k1_half + 1) - m;
         
-        int temp = ccsds_interleaver[i];
-        ccsds_interleaver[i] = ccsds_interleaver[j];
-        ccsds_interleaver[j] = temp;
+        // 存储 (0-based indexing for C arrays)
+        // interleaver[s-1] = pi_s - 1 表示输出位置 s 对应的输入位置
+        ccsds_interleaver[s - 1] = pi_s - 1;
     }
     
-    printf("[CCSDS] Interleaver initialized (K=%d, S-random approximation)\n", CCSDS_K);
+    // 验证测试点
+    #ifdef _DEBUG
+    printf("[CCSDS] Interleaver verification:\n");
+    printf("  pi(1) = %d (expected: 4, 0-based: 3)\n", ccsds_interleaver[0] + 1);
+    printf("  pi(2) = %d (expected: 171, 0-based: 170)\n", ccsds_interleaver[1] + 1);
+    if (K == 8920) {
+        printf("  pi(8920) = %d (expected: 8749, 0-based: 8748)\n", ccsds_interleaver[8919] + 1);
+    }
+    #endif
+    
+    printf("[CCSDS] Interleaver initialized (K=%d, CCSDS 131.0-B-5 standard)\n", K);
 }
 
 /**
  * @brief 比特交织
  */
 static void ccsds_interleave_bits(int* in, int* out) {
-    for (int i = 0; i < CCSDS_K; i++) {
+    int K = g_ccsds_k;
+    for (int i = 0; i < K; i++) {
         out[i] = in[ccsds_interleaver[i]];
     }
     // 尾比特不交织
-    for (int i = CCSDS_K; i < CCSDS_message_length; i++) {
+    for (int i = K; i < ccsds_message_length; i++) {
         out[i] = in[i];
     }
 }
@@ -127,10 +183,11 @@ static void ccsds_interleave_bits(int* in, int* out) {
  * @brief LLR 交织
  */
 static void ccsds_interleave_llr(double* in, double* out) {
-    for (int i = 0; i < CCSDS_K; i++) {
+    int K = g_ccsds_k;
+    for (int i = 0; i < K; i++) {
         out[i] = in[ccsds_interleaver[i]];
     }
-    for (int i = CCSDS_K; i < CCSDS_message_length; i++) {
+    for (int i = K; i < ccsds_message_length; i++) {
         out[i] = in[i];
     }
 }
@@ -139,10 +196,11 @@ static void ccsds_interleave_llr(double* in, double* out) {
  * @brief LLR 解交织
  */
 static void ccsds_deinterleave_llr(double* in, double* out) {
-    for (int i = 0; i < CCSDS_K; i++) {
+    int K = g_ccsds_k;
+    for (int i = 0; i < K; i++) {
         out[ccsds_interleaver[i]] = in[i];
     }
-    for (int i = CCSDS_K; i < CCSDS_message_length; i++) {
+    for (int i = K; i < ccsds_message_length; i++) {
         out[i] = in[i];
     }
 }
@@ -184,29 +242,30 @@ static void ccsds_component_rsc_encoder(int* input_msg, int* output_parity, int 
  * @brief CCSDS Turbo 编码器 (PCCC, R=1/3)
  */
 void ccsds_turbo_encoder(void) {
-    int interleaved_msg[CCSDS_message_length];
-    int parity1[CCSDS_message_length];
-    int parity2[CCSDS_message_length];
+    int K = g_ccsds_k;
+    static int interleaved_msg[CCSDS_message_length_max];
+    static int parity1[CCSDS_message_length_max];
+    static int parity2[CCSDS_message_length_max];
     
     // 1. 交织
     ccsds_interleave_bits(ccsds_message_padded, interleaved_msg);
     
     // 2. 编码器 1 (非交织)
-    ccsds_component_rsc_encoder(ccsds_message_padded, parity1, CCSDS_message_length);
+    ccsds_component_rsc_encoder(ccsds_message_padded, parity1, ccsds_message_length);
     
     // 3. 编码器 2 (交织)
-    ccsds_component_rsc_encoder(interleaved_msg, parity2, CCSDS_message_length);
+    ccsds_component_rsc_encoder(interleaved_msg, parity2, ccsds_message_length);
     
     // 4. 码字复用 [u, c1, c2] 重复 K 次
     int k = 0;
-    for (int i = 0; i < CCSDS_K; i++) {
+    for (int i = 0; i < K; i++) {
         ccsds_codeword[k++] = ccsds_message_padded[i]; // u (systematic)
         ccsds_codeword[k++] = parity1[i];              // c1
         ccsds_codeword[k++] = parity2[i];              // c2
     }
     
     // 5. 尾比特的校验位 (trellis termination)
-    for (int i = CCSDS_K; i < CCSDS_message_length; i++) {
+    for (int i = K; i < ccsds_message_length; i++) {
         ccsds_codeword[k++] = parity1[i];
         ccsds_codeword[k++] = parity2[i];
     }
@@ -216,7 +275,7 @@ void ccsds_turbo_encoder(void) {
  * @brief CCSDS Turbo BPSK 调制
  */
 void ccsds_turbo_modulation(void) {
-    for (int i = 0; i < CCSDS_codeword_length; i++) {
+    for (int i = 0; i < ccsds_codeword_length; i++) {
         ccsds_tx_symbol[i][0] = -1.0 * (2.0 * ccsds_codeword[i] - 1.0); // 0->+1, 1->-1
         ccsds_tx_symbol[i][1] = 0.0;
     }
@@ -226,7 +285,7 @@ void ccsds_turbo_modulation(void) {
  * @brief CCSDS Turbo AWGN 信道
  */
 void ccsds_turbo_channel(void) {
-    for (int i = 0; i < CCSDS_codeword_length; i++) {
+    for (int i = 0; i < ccsds_codeword_length; i++) {
         for (int j = 0; j < 2; j++) {
             double u = (double)rand() / (double)RAND_MAX;
             if (u == 1.0) u = 0.999999;
@@ -243,12 +302,13 @@ void ccsds_turbo_channel(void) {
  * @brief 随机生成 CCSDS 消息
  */
 void ccsds_turbo_generate_message(void) {
-    for (int i = 0; i < CCSDS_K; i++) {
+    int K = g_ccsds_k;
+    for (int i = 0; i < K; i++) {
         ccsds_message[i] = rand() % 2;
         ccsds_message_padded[i] = ccsds_message[i];
     }
     // 补零 (trellis termination)
-    for (int i = CCSDS_K; i < CCSDS_message_length; i++) {
+    for (int i = K; i < ccsds_message_length; i++) {
         ccsds_message_padded[i] = 0;
     }
 }
@@ -257,8 +317,9 @@ void ccsds_turbo_generate_message(void) {
  * @brief 检查误比特
  */
 long int ccsds_turbo_check_errors(void) {
+    int K = g_ccsds_k;
     long int errors = 0;
-    for (int i = 0; i < CCSDS_K; i++) {
+    for (int i = 0; i < K; i++) {
         if (ccsds_message[i] != ccsds_de_message[i]) {
             errors++;
         }
@@ -332,12 +393,14 @@ static double ccsds_jac_log(double a, double b) {
  * @brief CCSDS 16-state Log-MAP 译码器
  */
 static void ccsds_log_map_decoder(double* Lc_sys, double* Lc_par, double* La_in, double* Le_out) {
-    static double log_alpha[CCSDS_message_length + 1][CCSDS_ST_NUM];
-    static double log_beta[CCSDS_message_length + 1][CCSDS_ST_NUM];
-    static double log_gamma[CCSDS_message_length][CCSDS_LINE_NUM];
+    static double log_alpha[CCSDS_message_length_max + 1][CCSDS_ST_NUM];
+    static double log_beta[CCSDS_message_length_max + 1][CCSDS_ST_NUM];
+    static double log_gamma[CCSDS_message_length_max][CCSDS_LINE_NUM];
+    
+    int msg_len = ccsds_message_length;
     
     // 1. 计算分支度量 (Log-Gamma)
-    for (int t = 0; t < CCSDS_message_length; t++) {
+    for (int t = 0; t < msg_len; t++) {
         for (int idx = 0; idx < CCSDS_LINE_NUM; idx++) {
             int u = ccsds_trellis[idx].input;
             int c = ccsds_trellis[idx].output;
@@ -355,7 +418,7 @@ static void ccsds_log_map_decoder(double* Lc_sys, double* Lc_par, double* La_in,
     }
     log_alpha[0][0] = LOG_ONE_CCSDS;
     
-    for (int t = 1; t < CCSDS_message_length + 1; t++) {
+    for (int t = 1; t < msg_len + 1; t++) {
         for (int s = 0; s < CCSDS_ST_NUM; s++) {
             log_alpha[t][s] = LOG_ZERO_CCSDS;
         }
@@ -377,10 +440,10 @@ static void ccsds_log_map_decoder(double* Lc_sys, double* Lc_par, double* La_in,
     
     // 3. 计算后向概率 (Log-Beta)
     for (int s = 0; s < CCSDS_ST_NUM; s++) {
-        log_beta[CCSDS_message_length][s] = LOG_ONE_CCSDS;  // 等概率结束
+        log_beta[msg_len][s] = LOG_ONE_CCSDS;  // 等概率结束
     }
     
-    for (int t = CCSDS_message_length - 1; t >= 0; t--) {
+    for (int t = msg_len - 1; t >= 0; t--) {
         for (int s = 0; s < CCSDS_ST_NUM; s++) {
             log_beta[t][s] = LOG_ZERO_CCSDS;
         }
@@ -401,7 +464,7 @@ static void ccsds_log_map_decoder(double* Lc_sys, double* Lc_par, double* La_in,
     }
     
     // 4. 计算外在信息
-    for (int t = 0; t < CCSDS_message_length; t++) {
+    for (int t = 0; t < msg_len; t++) {
         double L_app_0 = LOG_ZERO_CCSDS;
         double L_app_1 = LOG_ZERO_CCSDS;
         
@@ -432,19 +495,21 @@ static void ccsds_log_map_decoder(double* Lc_sys, double* Lc_par, double* La_in,
  * @brief CCSDS Turbo 迭代译码器
  */
 void ccsds_turbo_decoder(void) {
+    int K = g_ccsds_k;
+    
     // 1. 计算信道 LLR
     double Lc_factor = 4.0 / N0;
     int k = 0;
     
     // 数据部分
-    for (int i = 0; i < CCSDS_K; i++) {
+    for (int i = 0; i < K; i++) {
         ccsds_Lc_sys[i]  = Lc_factor * ccsds_rx_symbol[k++][0];
         ccsds_Lc_par1[i] = Lc_factor * ccsds_rx_symbol[k++][0];
         ccsds_Lc_par2[i] = Lc_factor * ccsds_rx_symbol[k++][0];
     }
     
     // 尾比特部分
-    for (int i = CCSDS_K; i < CCSDS_message_length; i++) {
+    for (int i = K; i < ccsds_message_length; i++) {
         double rx_llr = Lc_factor * ccsds_rx_symbol[k++][0];
         ccsds_Lc_sys[i] = rx_llr + 500.0;  // 强先验 (已知为0)
         ccsds_Lc_par1[i] = Lc_factor * ccsds_rx_symbol[k++][0];
@@ -452,12 +517,13 @@ void ccsds_turbo_decoder(void) {
     }
     
     // 2. 初始化先验信息
-    for (int i = 0; i < CCSDS_message_length; i++) {
+    for (int i = 0; i < ccsds_message_length; i++) {
         ccsds_La_2_to_1[i] = 0.0;
         ccsds_La_1_to_2[i] = 0.0;
     }
     
     // 3. 迭代译码
+    static double Lc_sys_interleaved[CCSDS_message_length_max];
     for (int iter = 0; iter < CCSDS_ITERATIONS; iter++) {
         // DEC1
         ccsds_log_map_decoder(ccsds_Lc_sys, ccsds_Lc_par1, ccsds_La_2_to_1, ccsds_Le_1);
@@ -466,7 +532,6 @@ void ccsds_turbo_decoder(void) {
         ccsds_interleave_llr(ccsds_Le_1, ccsds_La_1_to_2);
         
         // 交织系统位
-        double Lc_sys_interleaved[CCSDS_message_length];
         ccsds_interleave_llr(ccsds_Lc_sys, Lc_sys_interleaved);
         
         // DEC2
@@ -477,7 +542,7 @@ void ccsds_turbo_decoder(void) {
     }
     
     // 4. 最终判决
-    for (int i = 0; i < CCSDS_K; i++) {
+    for (int i = 0; i < K; i++) {
         ccsds_L_APP[i] = ccsds_Lc_sys[i] + ccsds_La_2_to_1[i] + ccsds_Le_1[i];
         ccsds_de_message[i] = (ccsds_L_APP[i] > 0.0) ? 0 : 1;
     }
@@ -488,7 +553,8 @@ void ccsds_turbo_decoder(void) {
 // =================================================================
 
 void run_ccsds_turbo_simulation(SimConfig* cfg, FILE* csv_fp) {
-    double code_rate = (double)CCSDS_K / (double)(CCSDS_K * 3);
+    int K = g_ccsds_k;
+    double code_rate = (double)K / (double)(K * 3);
     
     long int bit_error, frame_error, seq;
     double BER, FER;
@@ -540,7 +606,7 @@ void run_ccsds_turbo_simulation(SimConfig* cfg, FILE* csv_fp) {
         }
         printf("\r                                                                        \r");
         
-        long total_bits = (long)CCSDS_K * actual_frames;
+        long total_bits = (long)K * actual_frames;
         BER = (double)bit_error / (double)total_bits;
         FER = (double)frame_error / (double)actual_frames;
         

@@ -35,7 +35,7 @@ void print_sim_header(DecoderType decoder, SimConfig* cfg) {
     
     if (decoder == DECODER_TURBO) {
         if (g_turbo_type == TURBO_TYPE_CCSDS) {
-            block_size = CCSDS_K;
+            block_size = g_ccsds_k;
             turbo_variant = " (CCSDS)";
         } else {
             block_size = TURBO_MESSAGE_BITS;
@@ -325,7 +325,7 @@ void run_simulation(DecoderType decoder, SimConfig* cfg) {
             break;
         case DECODER_TURBO:
             code_rate = 1.0 / 3.0;
-            block_size = (g_turbo_type == TURBO_TYPE_CCSDS) ? CCSDS_K : TURBO_MESSAGE_BITS;
+            block_size = (g_turbo_type == TURBO_TYPE_CCSDS) ? g_ccsds_k : TURBO_MESSAGE_BITS;
             break;
         default:
             code_rate = 0.5;

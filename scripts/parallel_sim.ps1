@@ -37,6 +37,10 @@ param(
     [ValidateRange(0, 1)]
     [int]$TurboType = 0,  # 0=(7,5)_8, 1=CCSDS
     
+    [Parameter(Mandatory=$false)]
+    [ValidateSet(1784, 3568, 7136, 8920)]
+    [int]$CcsdsK = 1784,  # CCSDS block size
+    
     [Parameter(Mandatory=$true)]
     [float]$StartSNR,
     
@@ -266,6 +270,9 @@ $snrPoints = Get-SNRPoints -Start $StartSNR -End $EndSNR -StepSize $Step
 Write-Host "  [Config] $($snrPoints.Count) SNR points: $StartSNR to $EndSNR dB (step $Step)"
 Write-Host "  [Config] $Frames frames per SNR point"
 Write-Host "  [Config] Decoder: $($DecoderNames[$Decoder])"
+if ($Decoder -eq 4 -and $TurboType -eq 1) {
+    Write-Host "  [Config] CCSDS K=$CcsdsK bits"
+}
 
 # Ensure output directory exists
 if (-not (Test-Path $OutputDir)) {
@@ -300,10 +307,10 @@ for ($i = 0; $i -lt $actualWorkers; $i++) {
     
     $seed = 10000 + $i * 1000 + (Get-Random -Maximum 999)
     
-    # Build command arguments (include --turbo-type for Turbo decoder)
+    # Build command arguments (include --turbo-type and --ccsds-k for Turbo decoder)
     $turboArg = ""
     if ($Decoder -eq 4) {
-        $turboArg = " --turbo-type $TurboType"
+        $turboArg = " --turbo-type $TurboType --ccsds-k $CcsdsK"
     }
     $cmdArgs = "--batch --decoder $Decoder$turboArg --snr $($chunk.StartSNR) $($chunk.EndSNR) $Step --frames $Frames --output `"$outFile`" --seed $seed --quiet"
     

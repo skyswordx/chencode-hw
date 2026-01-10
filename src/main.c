@@ -104,7 +104,7 @@ int get_turbo_type_choice(void) {
     printf("  ================================================================\n");
     printf("\n");
     printf("    [0]  (7,5)_8 4-state    Custom RSC (K=1024 bits)\n");
-    printf("    [1]  CCSDS  16-state    NASA Standard (K=1784 bits)\n");
+    printf("    [1]  CCSDS  16-state    NASA Standard (Dynamic K)\n");
     printf("\n");
     printf("  ================================================================\n");
     
@@ -118,6 +118,34 @@ int get_turbo_type_choice(void) {
         }
     }
     return choice;
+}
+
+int get_ccsds_k_choice(void) {
+    printf("\n");
+    printf("  ================================================================\n");
+    printf("                   Select CCSDS Block Size (K)\n");
+    printf("  ================================================================\n");
+    printf("\n");
+    printf("    [0]  K = 1784  bits   (k1=8, k2=223)\n");
+    printf("    [1]  K = 3568  bits   (k1=8, k2=446)\n");
+    printf("    [2]  K = 7136  bits   (k1=8, k2=892)\n");
+    printf("    [3]  K = 8920  bits   (k1=8, k2=1115)\n");
+    printf("\n");
+    printf("  ================================================================\n");
+    
+    int choice = -1;
+    while (choice < 0 || choice > 3) {
+        printf("  Select K option [0-3]: ");
+        if (scanf("%d", &choice) != 1) {
+            while (getchar() != '\n');
+            choice = -1;
+            printf("  [Error] Please enter 0, 1, 2, or 3\n");
+        }
+    }
+    
+    // Map choice to actual K value
+    int k_values[] = {1784, 3568, 7136, 8920};
+    return k_values[choice];
 }
 
 void get_snr_range(float* start, float* end, float* step) {
@@ -166,6 +194,7 @@ typedef struct {
     int quiet_mode;         // 1 if --quiet flag is present  
     int decoder;            // Decoder type (0-4)
     int turbo_type;         // Turbo variant (0=(7,5)_8, 1=CCSDS)
+    int ccsds_k;            // CCSDS block size (1784, 3568, 7136, 8920)
     float start_snr;
     float end_snr;
     float step;
@@ -180,14 +209,15 @@ void print_usage(const char* prog_name) {
     printf("  %s --batch [options]        Batch mode for parallel execution\n\n", prog_name);
     printf("Batch mode options:\n");
     printf("  --decoder <0-4>     Decoder type (0=Uncoded, 1=HardViterbi, 2=SoftViterbi, 3=BCJR, 4=Turbo)\n");
-    printf("  --turbo-type <0-1>  Turbo variant (0=(7,5)_8 K=1024, 1=CCSDS K=1784)\n");
+    printf("  --turbo-type <0-1>  Turbo variant (0=(7,5)_8 K=1024, 1=CCSDS)\n");
+    printf("  --ccsds-k <K>       CCSDS block size: 1784, 3568, 7136, or 8920 (default: 1784)\n");
     printf("  --snr <start> <end> <step>   SNR range in dB\n");
     printf("  --frames <N>        Number of frames per SNR point\n");
     printf("  --output <file>     Output CSV file path\n");
     printf("  --seed <N>          Random seed (default: time-based)\n");
     printf("  --quiet             Suppress console output (for parallel execution)\n");
     printf("\nExample:\n");
-    printf("  %s --batch --decoder 4 --turbo-type 1 --snr -0.5 1.5 0.1 --frames 10000 --output ccsds.csv\n\n", prog_name);
+    printf("  %s --batch --decoder 4 --turbo-type 1 --ccsds-k 8920 --snr 0.0 0.7 0.1 --frames 20000 --output ccsds_8920.csv\n\n", prog_name);
 }
 
 int parse_cli_args(int argc, char* argv[], CLIArgs* args) {
@@ -195,6 +225,7 @@ int parse_cli_args(int argc, char* argv[], CLIArgs* args) {
     memset(args, 0, sizeof(CLIArgs));
     args->step = 1.0f;
     args->seed = 0;  // Will use time if 0
+    args->ccsds_k = 1784;  // Default CCSDS K
     
     if (argc == 1) {
         return 0;  // Interactive mode
@@ -226,6 +257,9 @@ int parse_cli_args(int argc, char* argv[], CLIArgs* args) {
         }
         else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
             args->seed = (unsigned int)atoi(argv[++i]);
+        }
+        else if (strcmp(argv[i], "--ccsds-k") == 0 && i + 1 < argc) {
+            args->ccsds_k = atoi(argv[++i]);
         }
         else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
@@ -278,6 +312,14 @@ int main(int argc, char* argv[]) {
         // Set Turbo type if decoder is Turbo
         if (g_decoder_type == DECODER_TURBO) {
             g_turbo_type = (TurboType)cli_args.turbo_type;
+            // Set CCSDS K if using CCSDS Turbo
+            if (g_turbo_type == TURBO_TYPE_CCSDS) {
+                extern int ccsds_set_block_size(int k);
+                if (!ccsds_set_block_size(cli_args.ccsds_k)) {
+                    fprintf(stderr, "[Error] Invalid CCSDS K: %d\n", cli_args.ccsds_k);
+                    return 1;
+                }
+            }
         }
         
         // Fill simulation config
@@ -322,6 +364,13 @@ int main(int argc, char* argv[]) {
         if (g_decoder_type == DECODER_TURBO) {
             int turbo_choice = get_turbo_type_choice();
             g_turbo_type = (TurboType)turbo_choice;
+            
+            // If CCSDS, ask for K value
+            if (g_turbo_type == TURBO_TYPE_CCSDS) {
+                int k_value = get_ccsds_k_choice();
+                extern int ccsds_set_block_size(int k);
+                ccsds_set_block_size(k_value);
+            }
         }
         
         // Get SNR range

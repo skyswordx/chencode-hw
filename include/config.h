@@ -79,10 +79,21 @@ extern TurboType g_turbo_type;
 #define CCSDS_ST_NUM 16            // CCSDS: 16 状态 (2^4)
 #define CCSDS_LINE_NUM 32          // CCSDS: 32 条转移边
 #define CCSDS_STATE_MEM 4          // CCSDS: 记忆深度 m=4
-#define CCSDS_K 1784               // CCSDS: 信息比特数 (初始仅支持1784)
-#define CCSDS_message_length (CCSDS_K + CCSDS_STATE_MEM)
-#define CCSDS_codeword_length (CCSDS_K * 3 + CCSDS_STATE_MEM * 4)
 #define CCSDS_ITERATIONS 10        // CCSDS: 译码器迭代次数 (NASA基准为10)
+
+// 动态 K 值支持 (运行时选择)
+#define CCSDS_K_MAX 8920           // 最大支持的 K 值 (用于静态数组分配)
+#define CCSDS_K_1784  1784         // K=1784 (k1=8, k2=223)
+#define CCSDS_K_3568  3568         // K=3568 (k1=8, k2=446)
+#define CCSDS_K_7136  7136         // K=7136 (k1=8, k2=892)
+#define CCSDS_K_8920  8920         // K=8920 (k1=8, k2=1115)
+
+// 运行时 K 值 (在 ccsds_turbo.c 中定义)
+extern int g_ccsds_k;
+
+// 静态数组使用最大尺寸分配
+#define CCSDS_message_length_max (CCSDS_K_MAX + CCSDS_STATE_MEM)
+#define CCSDS_codeword_length_max (CCSDS_K_MAX * 3 + CCSDS_STATE_MEM * 4)
 
 // =================================================================
 // --- 译码器名称字符串 ---
