@@ -32,7 +32,8 @@ static int ccsds_codeword_length;  // 依赖码率: R=1/3 为 K*3+16, R=1/2 为 
 // =================================================================
 static int ccsds_message[CCSDS_K_MAX];                       // 原始消息
 static int ccsds_message_padded[CCSDS_message_length_max];   // 补零后的消息
-static int ccsds_interleaver[CCSDS_K_MAX];                   // 交织器
+static int ccsds_interleaver[CCSDS_K_MAX];                   // 交织器: interleaver[i] = π⁻¹(i)
+static int ccsds_deinterleaver[CCSDS_K_MAX];                 // 解交织器: deinterleaver[i] = π(i)
 static int ccsds_codeword[CCSDS_codeword_length_max];        // 编码后的码字
 static int ccsds_de_message[CCSDS_K_MAX];                    // 最终译码消息
 
@@ -150,7 +151,15 @@ void ccsds_turbo_init(void) {
         
         // 存储 (0-based indexing for C arrays)
         // interleaver[s-1] = pi_s - 1 表示输出位置 s 对应的输入位置
+        // 即 interleaved[s-1] = original[interleaver[s-1]]
         ccsds_interleaver[s - 1] = pi_s - 1;
+    }
+    
+    // 构建 deinterleaver (反向映射)
+    // deinterleaver[i] = j 表示原始位置 i 映射到交织位置 j
+    // 即 interleaved[j] = original[i], 所以 j 满足 interleaver[j] = i
+    for (int j = 0; j < K; j++) {
+        ccsds_deinterleaver[ccsds_interleaver[j]] = j;
     }
     
     // 验证测试点
@@ -262,19 +271,22 @@ void ccsds_turbo_encoder(void) {
     
     if (g_ccsds_rate == CCSDS_RATE_1_2) {
         // === R=1/2 打孔模式 ===
-        // CCSDS 131.0-B-5: [u, C_a(odd), C_b(even)]
-        // 奇数位发送 C_a, 偶数位发送 C_b
+        // CCSDS 131.0-B-5: 对于 1-indexed 位置 s
+        // s 奇数: 发送 C_a[s]  (s=1,3,5... 即 0-indexed i=0,2,4...)
+        // s 偶数: 发送 C_b[s]  (s=2,4,6... 即 0-indexed i=1,3,5...)
         for (int i = 0; i < K; i++) {
             ccsds_codeword[k++] = ccsds_message_padded[i]; // u (systematic)
-            if (i % 2 == 1) {
-                ccsds_codeword[k++] = parity1[i];  // C_a for odd i
+            if (i % 2 == 0) {
+                // i=0,2,4... (s=1,3,5... 奇数) -> C_a
+                ccsds_codeword[k++] = parity1[i];
             } else {
-                ccsds_codeword[k++] = parity2[i];  // C_b for even i
+                // i=1,3,5... (s=2,4,6... 偶数) -> C_b
+                ccsds_codeword[k++] = parity2[i];
             }
         }
-        // 尾比特 (简化: 交替发送)
+        // 尾比特 (交替发送)
         for (int i = K; i < ccsds_message_length; i++) {
-            if (i % 2 == 1) {
+            if (i % 2 == 0) {
                 ccsds_codeword[k++] = parity1[i];
             } else {
                 ccsds_codeword[k++] = parity2[i];
@@ -530,26 +542,28 @@ void ccsds_turbo_decoder(void) {
     
     if (g_ccsds_rate == CCSDS_RATE_1_2) {
         // === R=1/2 去打孔模式 ===
-        // 接收序列: [u, parity] 其中 parity 交替来自 C_a(odd) 或 C_b(even)
+        // 接收序列: [u, parity]
+        // i=0,2,4... (s=1,3,5... 奇数) -> parity 是 C_a
+        // i=1,3,5... (s=2,4,6... 偶数) -> parity 是 C_b
         for (int i = 0; i < K; i++) {
             ccsds_Lc_sys[i] = Lc_factor * ccsds_rx_symbol[k++][0];
             double parity_llr = Lc_factor * ccsds_rx_symbol[k++][0];
             
-            if (i % 2 == 1) {
-                // 奇数位: 接收的是 C_a, C_b 被打孔
+            if (i % 2 == 0) {
+                // i=0,2,4... (s 奇数): 接收的是 C_a, C_b 被打孔
                 ccsds_Lc_par1[i] = parity_llr;  // C_a present
-                ccsds_Lc_par2[i] = 0.0;         // C_b punctured (insert 0 LLR)
+                ccsds_Lc_par2[i] = 0.0;         // C_b punctured
             } else {
-                // 偶数位: 接收的是 C_b, C_a 被打孔
-                ccsds_Lc_par1[i] = 0.0;         // C_a punctured (insert 0 LLR)
+                // i=1,3,5... (s 偶数): 接收的是 C_b, C_a 被打孔
+                ccsds_Lc_par1[i] = 0.0;         // C_a punctured
                 ccsds_Lc_par2[i] = parity_llr;  // C_b present
             }
         }
-        // 尾比特部分 (简化处理)
+        // 尾比特部分
         for (int i = K; i < ccsds_message_length; i++) {
             ccsds_Lc_sys[i] = 500.0;  // 强先验 (已知为0)
             double parity_llr = Lc_factor * ccsds_rx_symbol[k++][0];
-            if (i % 2 == 1) {
+            if (i % 2 == 0) {
                 ccsds_Lc_par1[i] = parity_llr;
                 ccsds_Lc_par2[i] = 0.0;
             } else {
@@ -581,8 +595,9 @@ void ccsds_turbo_decoder(void) {
     
     // 3. 迭代译码
     static double Lc_sys_interleaved[CCSDS_message_length_max];
+    
     for (int iter = 0; iter < CCSDS_ITERATIONS; iter++) {
-        // DEC1
+        // DEC1: 使用原始系统位 + C_a (parity1)
         ccsds_log_map_decoder(ccsds_Lc_sys, ccsds_Lc_par1, ccsds_La_2_to_1, ccsds_Le_1);
         
         // 交织外在信息
@@ -591,7 +606,8 @@ void ccsds_turbo_decoder(void) {
         // 交织系统位
         ccsds_interleave_llr(ccsds_Lc_sys, Lc_sys_interleaved);
         
-        // DEC2
+        // DEC2: 使用交织后系统位 + C_b (parity2)
+        // 注意: parity2 是从交织后的消息编码得到的, 所以不需要额外交织
         ccsds_log_map_decoder(Lc_sys_interleaved, ccsds_Lc_par2, ccsds_La_1_to_2, ccsds_Le_2);
         
         // 解交织外在信息

@@ -1,0 +1,12 @@
+﻿# Channel Coding Simulation Results (Merged)
+# Decoder: Turbo_LogMAP
+# Block Size (K): 1784
+# Rate: 1/3
+# Total Frames per SNR: 50 (Target)
+# Command: .\scripts\parallel_sim.ps1 -Decoder 4 -TurboType 1 -CcsdsK 1784 -CcsdsRate 0 -StartSNR 0 -EndSNR 2 -Step 1 -Frames 50
+# Generated: 2026-01-10 21:55:40
+#
+Eb_N0,Bit_Errors,Total_Bits,BER,Frame_Errors,Total_Frames,FER
+0.0,5365,89200,6.014574e-02,31,50,6.200000e-01
+1.0,0,89200,0.000000e+00,0,50,0.000000e+00
+2.0,0,89200,0.000000e+00,0,50,0.000000e+00

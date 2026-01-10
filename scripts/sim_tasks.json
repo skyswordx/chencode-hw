@@ -1,0 +1,28 @@
+{
+    "tasks": [
+        {
+            "id": "k1784_r1_3",
+            "name": "CCSDS K=1784 R=1/3",
+            "decoder": 4,
+            "turboType": 1,
+            "ccsdsK": 1784,
+            "ccsdsRate": 0,
+            "startSNR": 0.0,
+            "endSNR": 2.0,
+            "step": 0.2,
+            "targetFrames": 5000
+        },
+        {
+            "id": "k8920_r1_3",
+            "name": "CCSDS K=8920 R=1/3",
+            "decoder": 4,
+            "turboType": 1,
+            "ccsdsK": 8920,
+            "ccsdsRate": 0,
+            "startSNR": -0.4,
+            "endSNR": 1.4,
+            "step": 0.2,
+            "targetFrames": 3000
+        }
+    ]
+}

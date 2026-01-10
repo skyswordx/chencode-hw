@@ -57,14 +57,24 @@ param(
     [Parameter(Mandatory=$true)]
     [long]$Frames,
     
-    [int]$Workers = 0
+    [int]$Workers = 0,
+    
+    [string]$OutputDir = "",
+    
+    [long]$SeedOffset = 0
 )
 
 # Configuration
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 $ExePath = Join-Path $ProjectRoot "chencode_sim.exe"
-$OutputDir = Join-Path $ProjectRoot "output"
+
+if ($OutputDir -eq "") {
+    $OutputDir = Join-Path $ProjectRoot "output"
+} elseif (-not (Split-Path $OutputDir -IsAbsolute)) {
+    # Treat relative path as relative to ProjectRoot
+    $OutputDir = Join-Path $ProjectRoot $OutputDir
+}
 $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 
 $DecoderNames = @(
@@ -209,11 +219,24 @@ function Merge-CSVFiles {
         [string[]]$InputFiles,
         [string]$OutputFile,
         [string]$DecoderName,
-        [long]$TotalFrames
+        [long]$TotalFrames,
+        [int]$K,
+        [string]$RateStr,
+        [string]$CommandStr
     )
     
     $allData = @()
     
+    # Read existing data if output file exists (for append/merge mode)
+    if (Test-Path $OutputFile) {
+        $existingContent = Get-Content $OutputFile
+        foreach ($line in $existingContent) {
+             if ($line -notmatch "^#" -and $line.Trim() -ne "" -and $line -notmatch "Eb_N0" -and $line -notmatch "SNR_dB") {
+                $allData += $line
+            }
+        }
+    }
+
     foreach ($file in $InputFiles) {
         if (Test-Path $file) {
             $content = Get-Content $file
@@ -226,12 +249,18 @@ function Merge-CSVFiles {
         }
     }
     
+    # Simple sort by SNR (first column)
+    # Note: For multiple runs of same SNR, this simple sort is fine,
+    # but ideally we should aggregate them. For now, we list all points.
     $sortedData = $allData | Sort-Object { [float]($_ -split ",")[0] }
     
     $header = @(
         "# Channel Coding Simulation Results (Merged)",
         "# Decoder: $DecoderName",
-        "# Total Frames per SNR: $TotalFrames",
+        "# Block Size (K): $K",
+        "# Rate: $RateStr",
+        "# Total Frames per SNR: $TotalFrames (Target)",
+        "# Command: $CommandStr",
         "# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
         "#",
         "Eb_N0,Bit_Errors,Total_Bits,BER,Frame_Errors,Total_Frames,FER"
@@ -309,7 +338,9 @@ for ($i = 0; $i -lt $actualWorkers; $i++) {
     $outFile = Join-Path $OutputDir "part_${i}_${Timestamp}.csv"
     $outputFiles += $outFile
     
-    $seed = 10000 + $i * 1000 + (Get-Random -Maximum 999)
+    # Combined seed: Base + Offset + WorkerIndex*1000 + Random
+    # Using a much larger random range to avoid collisions.
+    $seed = 10000 + $SeedOffset + ($i * 1000) + (Get-Random -Maximum 999999)
     
     # Build command arguments (include --turbo-type, --ccsds-k, --ccsds-rate for Turbo decoder)
     $turboArg = ""
@@ -334,10 +365,34 @@ Write-Host ""
 Write-Host "  [Done] All workers completed!" -ForegroundColor Green
 
 # Merge results
-$mergedFile = Join-Path $OutputDir ("ber_" + $DecoderNames[$Decoder] + "_" + $Timestamp + "_merged.csv")
+$rateStr = "N/A"
+if ($Decoder -eq 4) {
+    if ($CcsdsRate -eq 0) { $rateStr = "1/3" }
+    elseif ($CcsdsRate -eq 1) { $rateStr = "1/2" }
+} elseif ($Decoder -eq 0) {
+    # Uncoded BPSK is effectively Rate 1 (raw bits) but physically R=1
+    $rateStr = "1.0"
+} else {
+    # Other decoders in this project (Viterbi/BCJR) might be R=1/2 fixed
+    $rateStr = "1/2" 
+}
+
+# Construct a more descriptive filename
+$baseName = "ber_" + $DecoderNames[$Decoder]
+if ($Decoder -eq 4) {
+    $baseName += "_K${CcsdsK}_R" + ($rateStr -replace "/", "-")
+}
+$mergedFile = Join-Path $OutputDir ("${baseName}_${Timestamp}_merged.csv")
+
 Write-Host "  [Merge] Combining results..." -ForegroundColor Cyan
 
-$dataPoints = Merge-CSVFiles -InputFiles $outputFiles -OutputFile $mergedFile -DecoderName $DecoderNames[$Decoder] -TotalFrames $Frames
+# Reconstruct command line for logging
+$cmdParts = @(".\scripts\parallel_sim.ps1", "-Decoder $Decoder")
+if ($Decoder -eq 4) { $cmdParts += "-TurboType $TurboType -CcsdsK $CcsdsK -CcsdsRate $CcsdsRate" }
+$cmdParts += "-StartSNR $StartSNR -EndSNR $EndSNR -Step $Step -Frames $Frames"
+$fullCmd = $cmdParts -join " "
+
+$dataPoints = Merge-CSVFiles -InputFiles $outputFiles -OutputFile $mergedFile -DecoderName $DecoderNames[$Decoder] -TotalFrames $Frames -K $CcsdsK -RateStr $rateStr -CommandStr $fullCmd
 
 # Clean up partial files
 foreach ($file in $outputFiles) {
