@@ -91,6 +91,17 @@ extern TurboType g_turbo_type;
 // 运行时 K 值 (在 ccsds_turbo.c 中定义)
 extern int g_ccsds_k;
 
+// =================================================================
+// --- CCSDS 码率选择 (打孔支持) ---
+// =================================================================
+typedef enum {
+    CCSDS_RATE_1_3 = 0,   // R=1/3 (无打孔, 默认)
+    CCSDS_RATE_1_2 = 1    // R=1/2 (打孔: 奇数位C_a, 偶数位C_b)
+} CcsdsCodeRate;
+
+// 运行时码率 (在 ccsds_turbo.c 中定义)
+extern CcsdsCodeRate g_ccsds_rate;
+
 // 静态数组使用最大尺寸分配
 #define CCSDS_message_length_max (CCSDS_K_MAX + CCSDS_STATE_MEM)
 #define CCSDS_codeword_length_max (CCSDS_K_MAX * 3 + CCSDS_STATE_MEM * 4)

@@ -41,6 +41,10 @@ param(
     [ValidateSet(1784, 3568, 7136, 8920)]
     [int]$CcsdsK = 1784,  # CCSDS block size
     
+    [Parameter(Mandatory=$false)]
+    [ValidateSet(0, 1)]
+    [int]$CcsdsRate = 0,  # 0=R1/3, 1=R1/2 (punctured)
+    
     [Parameter(Mandatory=$true)]
     [float]$StartSNR,
     
@@ -307,10 +311,10 @@ for ($i = 0; $i -lt $actualWorkers; $i++) {
     
     $seed = 10000 + $i * 1000 + (Get-Random -Maximum 999)
     
-    # Build command arguments (include --turbo-type and --ccsds-k for Turbo decoder)
+    # Build command arguments (include --turbo-type, --ccsds-k, --ccsds-rate for Turbo decoder)
     $turboArg = ""
     if ($Decoder -eq 4) {
-        $turboArg = " --turbo-type $TurboType --ccsds-k $CcsdsK"
+        $turboArg = " --turbo-type $TurboType --ccsds-k $CcsdsK --ccsds-rate $CcsdsRate"
     }
     $cmdArgs = "--batch --decoder $Decoder$turboArg --snr $($chunk.StartSNR) $($chunk.EndSNR) $Step --frames $Frames --output `"$outFile`" --seed $seed --quiet"
     
