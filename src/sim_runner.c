@@ -66,10 +66,13 @@ void run_uncoded_simulation(SimConfig* cfg, FILE* csv_fp) {
     double code_rate = 1.0; // Uncoded, R=1
     int block_size = CC_MESSAGE_BITS;
     
-    long int bit_error, seq;
-    double BER;
+    long int bit_error, frame_error, seq;
+    double BER, FER;
     
-    print_result_table_header();
+    // Print header with FER column
+    printf("+----------+---------------+---------------+----------------+---------------+----------------+\n");
+    printf("|  Eb/N0   |  Bit Errors   |  Total Bits   |      BER       | Frame Errors  |      FER       |\n");
+    printf("+----------+---------------+---------------+----------------+---------------+----------------+\n");
     
     for (float SNR = cfg->start_snr; SNR <= cfg->end_snr + 0.001; SNR += cfg->snr_step) {
         // 计算噪声参数
@@ -77,8 +80,11 @@ void run_uncoded_simulation(SimConfig* cfg, FILE* csv_fp) {
         sgm = sqrt(N0 / 2.0);
         
         bit_error = 0;
+        frame_error = 0;
         
         for (seq = 1; seq <= cfg->num_frames; seq++) {
+            long errors_this_frame = 0;
+            
             // 生成随机比特并直接 BPSK 调制/解调
             for (int i = 0; i < block_size; i++) {
                 int bit = rand() % 2;
@@ -95,18 +101,25 @@ void run_uncoded_simulation(SimConfig* cfg, FILE* csv_fp) {
                 // 硬判决
                 int decoded = (rx > 0) ? 0 : 1;
                 
-                if (bit != decoded) bit_error++;
+                if (bit != decoded) {
+                    bit_error++;
+                    errors_this_frame++;
+                }
             }
+            
+            if (errors_this_frame > 0) frame_error++;
         }
         
         long total_bits = (long)block_size * cfg->num_frames;
         BER = (double)bit_error / (double)total_bits;
+        FER = (double)frame_error / (double)cfg->num_frames;
         
-        print_result_row(SNR, bit_error, total_bits, BER);
-        csv_append_row(csv_fp, SNR, bit_error, total_bits, BER);
+        printf("|  %5.1f   |  %11ld  |  %11ld  |  %12.4e  |  %11ld  |  %12.4e  |\n", 
+               SNR, bit_error, total_bits, BER, frame_error, FER);
+        csv_append_row_with_fer(csv_fp, SNR, bit_error, total_bits, BER, frame_error, cfg->num_frames, FER);
     }
     
-    print_result_table_footer();
+    printf("+----------+---------------+---------------+----------------+---------------+----------------+\n");
 }
 
 // =================================================================
@@ -116,11 +129,14 @@ void run_uncoded_simulation(SimConfig* cfg, FILE* csv_fp) {
 void run_cc_simulation_v2(DecoderType decoder, SimConfig* cfg, FILE* csv_fp) {
     double code_rate = (double)CC_MESSAGE_BITS / (double)CC_codeword_length;
     
-    long int bit_error, seq;
-    double BER;
+    long int bit_error, frame_error, seq;
+    double BER, FER;
     int i;
     
-    print_result_table_header();
+    // Print header with FER column
+    printf("+----------+---------------+---------------+----------------+---------------+----------------+\n");
+    printf("|  Eb/N0   |  Bit Errors   |  Total Bits   |      BER       | Frame Errors  |      FER       |\n");
+    printf("+----------+---------------+---------------+----------------+---------------+----------------+\n");
     
     for (float SNR = cfg->start_snr; SNR <= cfg->end_snr + 0.001; SNR += cfg->snr_step) {
         // 计算噪声参数
@@ -128,6 +144,7 @@ void run_cc_simulation_v2(DecoderType decoder, SimConfig* cfg, FILE* csv_fp) {
         sgm = sqrt(N0 / 2.0);
         
         bit_error = 0;
+        frame_error = 0;
         
         for (seq = 1; seq <= cfg->num_frames; seq++) {
             // 1. 生成随机消息
@@ -164,20 +181,27 @@ void run_cc_simulation_v2(DecoderType decoder, SimConfig* cfg, FILE* csv_fp) {
                     break;
             }
             
-            // 7. 计误
+            // 7. 计误 (count errors per frame)
+            long errors_this_frame = 0;
             for (i = 0; i < CC_MESSAGE_BITS; i++) {
-                if (message[i] != de_message[i]) bit_error++;
+                if (message[i] != de_message[i]) {
+                    bit_error++;
+                    errors_this_frame++;
+                }
             }
+            if (errors_this_frame > 0) frame_error++;
         }
         
         long total_bits = (long)CC_MESSAGE_BITS * cfg->num_frames;
         BER = (double)bit_error / (double)total_bits;
+        FER = (double)frame_error / (double)cfg->num_frames;
         
-        print_result_row(SNR, bit_error, total_bits, BER);
-        csv_append_row(csv_fp, SNR, bit_error, total_bits, BER);
+        printf("|  %5.1f   |  %11ld  |  %11ld  |  %12.4e  |  %11ld  |  %12.4e  |\n", 
+               SNR, bit_error, total_bits, BER, frame_error, FER);
+        csv_append_row_with_fer(csv_fp, SNR, bit_error, total_bits, BER, frame_error, cfg->num_frames, FER);
     }
     
-    print_result_table_footer();
+    printf("+----------+---------------+---------------+----------------+---------------+----------------+\n");
 }
 
 // =================================================================
@@ -196,17 +220,19 @@ extern long int turbo_check_errors(void);
 void run_turbo_simulation_v2(SimConfig* cfg, FILE* csv_fp) {
     double code_rate = (double)TURBO_MESSAGE_BITS / (double)(TURBO_MESSAGE_BITS * 3);
     
-    long int bit_error, seq;
-    double BER;
+    long int bit_error, frame_error, seq;
+    double BER, FER;
     
-    // Early termination threshold - stop when this many errors are collected
-    // This provides statistically significant BER estimates while saving time
-    const long MIN_ERRORS = 100;
+    // Early termination threshold - stop when this many frame errors are collected
+    const long MIN_FRAME_ERRORS = 100;
     
     // 生成交织器 (仅一次)
     turbo_generate_interleaver();
     
-    print_result_table_header();
+    // Print header with FER column
+    printf("+----------+---------------+---------------+----------------+---------------+----------------+\n");
+    printf("|  Eb/N0   |  Bit Errors   |  Total Bits   |      BER       | Frame Errors  |      FER       |\n");
+    printf("+----------+---------------+---------------+----------------+---------------+----------------+\n");
     
     for (float SNR = cfg->start_snr; SNR <= cfg->end_snr + 0.001; SNR += cfg->snr_step) {
         // 计算噪声参数
@@ -214,6 +240,7 @@ void run_turbo_simulation_v2(SimConfig* cfg, FILE* csv_fp) {
         sgm = sqrt(N0 / 2.0);
         
         bit_error = 0;
+        frame_error = 0;
         long actual_frames = 0;
         
         for (seq = 1; seq <= cfg->num_frames; seq++) {
@@ -222,34 +249,43 @@ void run_turbo_simulation_v2(SimConfig* cfg, FILE* csv_fp) {
             turbo_modulation();
             turbo_channel();
             turbo_decoder_wrapper();
-            bit_error += turbo_check_errors();
+            
+            long errors_this_frame = turbo_check_errors();
+            bit_error += errors_this_frame;
+            if (errors_this_frame > 0) {
+                frame_error++;  // Count frames with at least 1 error
+            }
             actual_frames = seq;
             
-            // Early termination: stop if we have enough errors for statistical significance
-            if (bit_error >= MIN_ERRORS && seq >= 1000) {
-                // Only terminate early if we've run at least 1000 frames
+            // Early termination: stop if we have enough frame errors
+            if (frame_error >= MIN_FRAME_ERRORS && seq >= 1000) {
                 break;
             }
             
             // Progress indicator every 1000 frames
             if (seq % 1000 == 0) {
-                printf("\r  [SNR=%.1fdB] Frame %ld/%ld (%.1f%%) - Errors: %ld   ", 
+                printf("\r  [SNR=%.1fdB] Frame %ld/%ld (%.1f%%) - BitErr: %ld, FrameErr: %ld   ", 
                        SNR, seq, cfg->num_frames, 
-                       100.0 * seq / cfg->num_frames, bit_error);
+                       100.0 * seq / cfg->num_frames, bit_error, frame_error);
                 fflush(stdout);
             }
         }
-        printf("\r                                                              \r"); // Clear progress line
+        printf("\r                                                                        \r");
         
-        // Use actual frames simulated for BER calculation
+        // Calculate BER and FER
         long total_bits = (long)TURBO_MESSAGE_BITS * actual_frames;
         BER = (double)bit_error / (double)total_bits;
+        FER = (double)frame_error / (double)actual_frames;
         
-        print_result_row(SNR, bit_error, total_bits, BER);
-        csv_append_row(csv_fp, SNR, bit_error, total_bits, BER);
+        // Print result row with FER
+        printf("|  %5.1f   |  %11ld  |  %11ld  |  %12.4e  |  %11ld  |  %12.4e  |\n", 
+               SNR, bit_error, total_bits, BER, frame_error, FER);
+        
+        // Write to CSV with FER
+        csv_append_row_with_fer(csv_fp, SNR, bit_error, total_bits, BER, frame_error, actual_frames, FER);
     }
     
-    print_result_table_footer();
+    printf("+----------+---------------+---------------+----------------+---------------+----------------+\n");
 }
 
 // =================================================================

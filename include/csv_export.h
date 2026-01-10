@@ -26,6 +26,13 @@ void csv_append_row(FILE* fp, double snr, long bit_errors,
                     long total_bits, double ber);
 
 /**
+ * @brief 追加一行 BER+FER 数据到 CSV（用于 Turbo 码）
+ */
+void csv_append_row_with_fer(FILE* fp, double snr, long bit_errors,
+                              long total_bits, double ber,
+                              long frame_errors, long total_frames, double fer);
+
+/**
  * @brief 关闭 CSV 文件
  * @param fp 文件指针
  */

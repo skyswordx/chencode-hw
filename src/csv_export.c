@@ -43,8 +43,8 @@ FILE* csv_init(const char* filename, const char* decoder_name,
             t->tm_hour, t->tm_min, t->tm_sec);
     fprintf(fp, "# ============================================\n");
     
-    // CSV 表头
-    fprintf(fp, "SNR_dB,Bit_Errors,Total_Bits,BER\n");
+    // CSV 表头 (with FER columns)
+    fprintf(fp, "SNR_dB,Bit_Errors,Total_Bits,BER,Frame_Errors,Total_Frames,FER\n");
     
     return fp;
 }
@@ -52,8 +52,18 @@ FILE* csv_init(const char* filename, const char* decoder_name,
 void csv_append_row(FILE* fp, double snr, long bit_errors,
                     long total_bits, double ber) {
     if (!fp) return;
-    fprintf(fp, "%.1f,%ld,%ld,%.6e\n", snr, bit_errors, total_bits, ber);
-    fflush(fp); // 实时刷新，防止崩溃丢失数据
+    // Legacy format without FER
+    fprintf(fp, "%.1f,%ld,%ld,%.6e,0,0,0\n", snr, bit_errors, total_bits, ber);
+    fflush(fp);
+}
+
+void csv_append_row_with_fer(FILE* fp, double snr, long bit_errors,
+                              long total_bits, double ber,
+                              long frame_errors, long total_frames, double fer) {
+    if (!fp) return;
+    fprintf(fp, "%.1f,%ld,%ld,%.6e,%ld,%ld,%.6e\n", 
+            snr, bit_errors, total_bits, ber, frame_errors, total_frames, fer);
+    fflush(fp);
 }
 
 void csv_close(FILE* fp) {
