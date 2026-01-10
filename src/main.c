@@ -1,180 +1,319 @@
 /***************************************************
-信道编码课程作业：卷积码 & Turbo 码
-此程序模板提供了消息生成器、BPSK调制、AWGN信道模型和BPSK解调。
-此文件是整合了 Viterbi (硬/软)、BCJR 和 Turbo 译码器的完整仿真框架。
-***************************************************/
+ * Channel Coding Simulator v2.0
+ * Convolutional Code & Turbo Code Simulation
+ *
+ * Features:
+ *   - Runtime decoder selection (interactive menu)
+ *   - Uncoded BPSK / Hard Viterbi / Soft Viterbi / BCJR / Turbo
+ *   - Formatted table output + CSV data export
+ *   - MATLAB-compatible data import
+ ***************************************************/
 
-#define  _CRT_SECURE_NO_WARNINGS // 兼容 MSVC
+#define _CRT_SECURE_NO_WARNINGS
 
-// 包含所有自定义模块的头文件
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "config.h"
-#include "convolutional_code.h"
-#include "trellis.h"
-#include "viterbi.h"
-#include "bcjr.h"
-#include "turbo_code.h" // <-- 新增
+#include "sim_runner.h"
+#include "csv_export.h"
 
-// 码率 (根据译码器类型在 main 中设置)
-float code_rate;
+// =================================================================
+// --- Welcome Screen (Claude Code Style) ---
+// =================================================================
 
-// 编码器状态数 (在 main 中设置)
-int state_num;
+void enable_utf8_console(void) {
+#ifdef _WIN32
+    // Enable UTF-8 output on Windows
+    SetConsoleOutputCP(65001);
+#endif
+}
 
-// --- 函数原型声明 ---
-void statetable(); // 状态表生成 (在此项目中未使用，使用硬编码)
-void decoder();    // 卷积码译码器总入口
+void print_welcome(void) {
+    printf("\n\n");
+    
+    // Welcome header (Claude Code style)
+    printf("   \x1b[38;2;255;140;0m*\x1b[0m Welcome to \x1b[1mChencode Simulator\x1b[0m\n\n");
 
-/**
- * @brief 卷积码 (CC) 仿真流程
- */
-void run_cc_simulation(float start_snr, float finish_snr, long int seq_num)
-{
-    int i;
-	long int bit_error, seq;
-	double BER;
-	double progress;
+    // original for backup
+    // printf("    \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97   \xe2\x96\x88\xe2\x96\x88\xe2\x95\x97 \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97 \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97 \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97 \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\n");
+    // printf("   \xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\n");
+    // printf("   \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91     \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97 \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91     \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91   \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\n");
+    // printf("   \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91     \xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x95\x9a\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91     \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91   \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\n");
+    // printf("   \xe2\x95\x9a\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91 \xe2\x95\x9a\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x95\x9a\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x95\x9a\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x9d\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x9d\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\n");
+    // printf("    \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d  \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d  \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\n");
+    
+    
+    // CHENCODE - Box-drawing ASCII art with gradient colors (Orange -> Cyan)
+    // Line 1: Orange (255, 140, 0)
+    printf("\x1b[38;2;255;140;0m    \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97   \xe2\x96\x88\xe2\x96\x88\xe2\x95\x97 \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97 \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97 \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97 \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\x1b[0m\n");
+    // Line 2: Orange-Yellow (255, 170, 50)
+    printf("\x1b[38;2;255;170;50m   \xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\x1b[0m\n");
+    // Line 3: Yellow-Green (200, 200, 80)
+    printf("\x1b[38;2;200;200;80m   \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91     \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97 \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91     \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91   \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\x1b[0m\n");
+    // Line 4: Green-Cyan (100, 200, 150)
+    printf("\x1b[38;2;100;200;150m   \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91     \xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x95\x9a\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91     \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91   \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\x1b[0m\n");
+    // Line 5: Cyan (0, 200, 200)
+    printf("\x1b[38;2;0;200;200m   \xe2\x95\x9a\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91  \xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91 \xe2\x95\x9a\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x91\xe2\x95\x9a\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x95\x9a\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x9d\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x94\xe2\x95\x9d\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\x1b[0m\n");
+    // Line 6: Dark Cyan (0, 150, 180) for shadow effect
+    printf("\x1b[38;2;0;150;180m    \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d  \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d  \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d\x1b[0m\n");
+    
+    printf("\n");
+    printf("                       Channel Coding Simulator v2.0\n");
+    printf("                    (7,5)_8 Convolutional & PCCC Turbo\n");
+    printf("\n");
+}
 
-    // CC 码率 (仅计算信息比特)
-    code_rate = (float)CC_MESSAGE_BITS / (float)CC_codeword_length;
+void print_menu(void) {
+    printf("  ================================================================\n");
+    printf("                        Select Decoder Mode\n");
+    printf("  ================================================================\n");
+    printf("\n");
+    printf("    [0]  Uncoded BPSK      Theoretical baseline (no coding)\n");
+    printf("    [1]  Hard Viterbi      Hard-decision Viterbi (CC R=1/2)\n");
+    printf("    [2]  Soft Viterbi      Soft-decision Viterbi (CC R=1/2)\n");
+    printf("    [3]  BCJR / MAP        Maximum A Posteriori  (CC R=1/2)\n");
+    printf("    [4]  Turbo (Log-MAP)   Iterative Turbo Code  (PCCC R=1/3)\n");
+    printf("\n");
+    printf("  ================================================================\n");
+}
 
-    printf("=================================================================\n");
-    #if DECODER_TYPE == 1
-        printf("               当前译码器: 硬判决 Viterbi\n");
-    #elif DECODER_TYPE == 2
-        printf("               当前译码器: 软判决 Viterbi\n");
-    #elif DECODER_TYPE == 3
-        printf("               当前译码器: BCJR (MAP)\n");
-    #endif
-    printf("               码型: (7,5)_8 卷积码, R=1/2\n");
-    printf("=================================================================\n");
+int get_decoder_choice(void) {
+    int choice = -1;
+    while (choice < 0 || choice > 4) {
+        printf("  Select decoder type [0-4]: ");
+        if (scanf("%d", &choice) != 1) {
+            while (getchar() != '\n');
+            choice = -1;
+            printf("  [Error] Please enter a valid number (0-4)\n");
+        }
+    }
+    return choice;
+}
 
-    // 按 SNR 循环
-	for (float SNR = start_snr; SNR <= finish_snr; SNR++)
-	{
-		// 计算信道噪声参数
-		N0 = (1.0 / code_rate) / pow(10.0, (float)(SNR) / 10.0);
-		sgm = sqrt(N0 / 2.0); 
-		
-		bit_error = 0; // 误比特数清零
+void get_snr_range(float* start, float* end, float* step) {
+    printf("\n  Enter SNR range (in dB)\n");
+    
+    printf("    Start Eb/N0: ");
+    while (scanf("%f", start) != 1) {
+        while (getchar() != '\n');
+        printf("    [Error] Please enter a valid number: ");
+    }
+    
+    printf("    End Eb/N0: ");
+    while (scanf("%f", end) != 1) {
+        while (getchar() != '\n');
+        printf("    [Error] Please enter a valid number: ");
+    }
+    
+    printf("    Step size (default 1.0): ");
+    char buf[32];
+    while (getchar() != '\n');
+    if (fgets(buf, sizeof(buf), stdin) && buf[0] != '\n') {
+        sscanf(buf, "%f", step);
+    } else {
+        *step = 1.0f;
+    }
+    
+    if (*step <= 0) *step = 1.0f;
+}
 
-        // 按帧数循环
-		for (seq = 1; seq <= seq_num; seq++)
-		{
-			// 1. 随机生成二进制消息
-			for (i = 0; i < CC_MESSAGE_BITS; i++)
-			{
-				message[i] = rand() % 2;
-			}
-            // 2. 补零 (尾比特)，用于 trellis 终止
-			for (i = CC_MESSAGE_BITS; i < CC_message_length; i++)
-			{
-				message[i] = 0;
-			}
+long get_frame_count(void) {
+    long count = 0;
+    printf("    Frames per SNR point (recommended 1000~50000): ");
+    while (scanf("%ld", &count) != 1 || count <= 0) {
+        while (getchar() != '\n');
+        printf("    [Error] Please enter a valid positive integer: ");
+    }
+    return count;
+}
 
-			// 3. 卷积编码
-			encoder();
+// =================================================================
+// --- Command Line Interface (Batch Mode) ---
+// =================================================================
 
-			// 4. BPSK 调制
-			modulation();
+typedef struct {
+    int batch_mode;         // 1 if --batch flag is present
+    int quiet_mode;         // 1 if --quiet flag is present  
+    int decoder;            // Decoder type (0-4)
+    float start_snr;
+    float end_snr;
+    float step;
+    long frames;
+    char output_file[256];
+    unsigned int seed;      // Random seed (0 = use time)
+} CLIArgs;
 
-			// 5. AWGN 信道
-			channel();
+void print_usage(const char* prog_name) {
+    printf("\nUsage:\n");
+    printf("  %s                          Interactive mode\n", prog_name);
+    printf("  %s --batch [options]        Batch mode for parallel execution\n\n", prog_name);
+    printf("Batch mode options:\n");
+    printf("  --decoder <0-4>     Decoder type (0=Uncoded, 1=HardViterbi, 2=SoftViterbi, 3=BCJR, 4=Turbo)\n");
+    printf("  --snr <start> <end> <step>   SNR range in dB\n");
+    printf("  --frames <N>        Number of frames per SNR point\n");
+    printf("  --output <file>     Output CSV file path\n");
+    printf("  --seed <N>          Random seed (default: time-based)\n");
+    printf("  --quiet             Suppress console output (for parallel execution)\n");
+    printf("\nExample:\n");
+    printf("  %s --batch --decoder 4 --snr -1.0 4.0 0.5 --frames 50000 --output output/part_0.csv --quiet\n\n", prog_name);
+}
 
-            // 6. BPSK 解调 (仅在硬判决时需要)
-            #if DECODER_TYPE == 1
-			    demodulation();
+int parse_cli_args(int argc, char* argv[], CLIArgs* args) {
+    // Initialize defaults
+    memset(args, 0, sizeof(CLIArgs));
+    args->step = 1.0f;
+    args->seed = 0;  // Will use time if 0
+    
+    if (argc == 1) {
+        return 0;  // Interactive mode
+    }
+    
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--batch") == 0) {
+            args->batch_mode = 1;
+        }
+        else if (strcmp(argv[i], "--quiet") == 0) {
+            args->quiet_mode = 1;
+        }
+        else if (strcmp(argv[i], "--decoder") == 0 && i + 1 < argc) {
+            args->decoder = atoi(argv[++i]);
+        }
+        else if (strcmp(argv[i], "--snr") == 0 && i + 3 < argc) {
+            args->start_snr = (float)atof(argv[++i]);
+            args->end_snr = (float)atof(argv[++i]);
+            args->step = (float)atof(argv[++i]);
+        }
+        else if (strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
+            args->frames = atol(argv[++i]);
+        }
+        else if (strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
+            strncpy(args->output_file, argv[++i], sizeof(args->output_file) - 1);
+        }
+        else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
+            args->seed = (unsigned int)atoi(argv[++i]);
+        }
+        else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            print_usage(argv[0]);
+            exit(0);
+        }
+    }
+    
+    return args->batch_mode;
+}
+
+// =================================================================
+// --- Main Function ---
+// =================================================================
+
+int main(int argc, char* argv[]) {
+    // Enable UTF-8 console output on Windows
+    enable_utf8_console();
+    
+    // Parse command line arguments
+    CLIArgs cli_args;
+    int is_batch_mode = parse_cli_args(argc, argv, &cli_args);
+    
+    if (is_batch_mode) {
+        // ===== BATCH MODE (for parallel execution) =====
+        
+        // Set random seed
+        if (cli_args.seed != 0) {
+            srand(cli_args.seed);
+        } else {
+            srand((unsigned int)time(NULL));
+        }
+        
+        // Validate arguments
+        if (cli_args.decoder < 0 || cli_args.decoder > 4) {
+            fprintf(stderr, "[Error] Invalid decoder type: %d\n", cli_args.decoder);
+            return 1;
+        }
+        if (cli_args.frames <= 0) {
+            fprintf(stderr, "[Error] Invalid frame count: %ld\n", cli_args.frames);
+            return 1;
+        }
+        if (strlen(cli_args.output_file) == 0) {
+            fprintf(stderr, "[Error] Output file not specified\n");
+            return 1;
+        }
+        
+        // Set global decoder type
+        g_decoder_type = (DecoderType)cli_args.decoder;
+        
+        // Fill simulation config
+        SimConfig cfg = {0};
+        cfg.start_snr = cli_args.start_snr;
+        cfg.end_snr = cli_args.end_snr;
+        cfg.snr_step = cli_args.step;
+        cfg.num_frames = cli_args.frames;
+        strncpy(cfg.csv_filename, cli_args.output_file, sizeof(cfg.csv_filename) - 1);
+        
+        // Suppress output in quiet mode
+        if (cli_args.quiet_mode) {
+            // Redirect stdout to NUL (Windows) or /dev/null (Unix)
+            #ifdef _WIN32
+            freopen("NUL", "w", stdout);
+            #else
+            freopen("/dev/null", "w", stdout);
             #endif
-
-			// 7. 卷积译码
-			decoder();
-
-			// 8. 计算误比特数
-            // 只比较 MESSAGE_BITS 个信息比特，不比较尾比特
-			for (i = 0; i < CC_MESSAGE_BITS; i++)
-			{
-				if (message[i] != de_message[i])
-					bit_error++;
-			}
-
-			progress = (double)(seq * 100) / (double)seq_num; 
-			BER = (double)bit_error / (double)(CC_MESSAGE_BITS * seq);
-
-			printf("进度=%5.1f%%, SNR=%4.1f dB, 误比特=%8ld, BER=%E\r", progress, SNR, bit_error, BER);
-		}
-
-		BER = (double)bit_error / (double)(CC_MESSAGE_BITS * seq_num);
-		printf("进度=100.0%%, SNR=%4.1f dB, 误比特=%8ld, BER=%E\n", SNR, bit_error, BER);
-	}
-}
-
-
-/**
- * @brief 主函数
- */
-int main()
-{
-	float start, finish;
-	long int seq_num;
-
-    // 设置编码器状态数 (用于 CC 消息补零)
-    state_num = STATE_MEM;
-
-	// 生成状态表 (未使用)
-	statetable();
-
-	// 设置随机数种子
-	srand((int)time(0));
-
-	// 输入 SNR 范围和仿真帧数
-	printf("\n请输入起始 SNR (dB): ");
-	scanf("%f", &start);
-	printf("\n请输入结束 SNR (dB): ");
-	scanf("%f", &finish);
-	printf("\n请输入要仿真的消息帧数: ");
-	scanf("%ld", &seq_num); // <-- 修复 Bug：使用 %ld 读取 long int
-
-    // 根据选择的译码器类型，执行不同的仿真流程
-    #if DECODER_TYPE <= 3
-        // 执行卷积码仿真
-        run_cc_simulation(start, finish, seq_num);
-    
-    #elif DECODER_TYPE == 4
-        // 执行 Turbo 码仿真
-        run_turbo_simulation(start, finish, seq_num);
-    
-    #endif
-
-	// 修复 Bug：使用 getchar() 替换 system("pause")，提高兼容性
-    printf("仿真完成，请按 Enter 键退出...\n");
-    while (getchar() != '\n'); // 清空输入缓冲区
-    getchar(); // 等待用户按键
-    
-    return 0;
-}
-
-/**
- * @brief 状态表生成函数 (空)
- */
-void statetable()
-{
-    // 空
-}
-
-/**
- * @brief 卷积码译码器总入口
- */
-void decoder()
-{ 
-    #if DECODER_TYPE == 1
-        hardDecoder(re_codeword, de_message, CC_message_length);
-    
-    #elif DECODER_TYPE == 2
-        softDecode(rx_symbol, de_message, CC_message_length);
-    
-    #elif DECODER_TYPE == 3
-        BCJR(rx_symbol, de_message, CC_message_length, CC_codeword_length);
-    
-    #else
-       // Turbo 码不使用此函数
-    #endif
+        }
+        
+        // Run simulation
+        run_simulation(g_decoder_type, &cfg);
+        
+        // Exit without waiting for input
+        return 0;
+        
+    } else {
+        // ===== INTERACTIVE MODE (original behavior) =====
+        
+        // Set random seed
+        srand((unsigned int)time(NULL));
+        
+        // Display welcome screen
+        print_welcome();
+        
+        // Display menu and get user selection
+        print_menu();
+        int decoder_choice = get_decoder_choice();
+        g_decoder_type = (DecoderType)decoder_choice;
+        
+        // Get SNR range
+        float start_snr, end_snr, snr_step;
+        get_snr_range(&start_snr, &end_snr, &snr_step);
+        
+        // Get frame count
+        long num_frames = get_frame_count();
+        
+        // Fill simulation config
+        SimConfig cfg = {0};
+        cfg.start_snr = start_snr;
+        cfg.end_snr = end_snr;
+        cfg.snr_step = snr_step;
+        cfg.num_frames = num_frames;
+        
+        // Run simulation
+        run_simulation(g_decoder_type, &cfg);
+        
+        // Completion message
+        printf("\n");
+        printf("  ================================================================\n");
+        printf("    Simulation complete! CSV file ready for MATLAB plotting.\n");
+        printf("    Use: readtable('%s', 'CommentStyle', '#')\n", cfg.csv_filename);
+        printf("  ================================================================\n");
+        
+        // Wait for user to press Enter
+        printf("\n  Press Enter to exit...\n");
+        while (getchar() != '\n');
+        getchar();
+        
+        return 0;
+    }
 }
