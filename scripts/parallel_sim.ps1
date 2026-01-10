@@ -38,7 +38,7 @@ param(
     [int]$TurboType = 0,  # 0=(7,5)_8, 1=CCSDS
     
     [Parameter(Mandatory=$false)]
-    [ValidateSet(1784, 3568, 7136, 8920)]
+    # [ValidateSet(1784, 3568, 7136, 8920)] # Removed to allow 0 for non-Turbo
     [int]$CcsdsK = 1784,  # CCSDS block size
     
     [Parameter(Mandatory=$false)]
