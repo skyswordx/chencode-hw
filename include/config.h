@@ -82,7 +82,7 @@ extern TurboType g_turbo_type;
 #define CCSDS_K 1784               // CCSDS: 信息比特数 (初始仅支持1784)
 #define CCSDS_message_length (CCSDS_K + CCSDS_STATE_MEM)
 #define CCSDS_codeword_length (CCSDS_K * 3 + CCSDS_STATE_MEM * 4)
-#define CCSDS_ITERATIONS 8         // CCSDS: 译码器迭代次数
+#define CCSDS_ITERATIONS 10        // CCSDS: 译码器迭代次数 (NASA基准为10)
 
 // =================================================================
 // --- 译码器名称字符串 ---

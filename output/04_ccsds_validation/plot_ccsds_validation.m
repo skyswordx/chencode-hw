@@ -4,7 +4,7 @@
 clear; close all; clc;
 
 %% === 读取你的仿真数据 ===
-your_data = readtable('ber_ccsds_1784.csv', 'CommentStyle', '#');
+your_data = readtable('./ber_Turbo_LogMAP_20260110_151936_merged.csv', 'CommentStyle', '#');
 % 获取列名
 colNames = your_data.Properties.VariableNames;
 fprintf('Available columns: %s\n', strjoin(colNames, ', '));
@@ -12,23 +12,16 @@ fprintf('Available columns: %s\n', strjoin(colNames, ', '));
 % 处理列名 (Eb_N0 来自 parallel_sim 合并)
 your_snr = your_data{:, 1};  % 第一列是 SNR
 your_ber = your_data{:, 4};  % 第四列是 BER
-% 尝试读取 FER (第 7 列), 如果没有表头可能会变成 Var7
+% 尝试读取 FER (第 7 列)
 if width(your_data) >= 7
     your_fer = your_data{:, 7};
 else
-    % 如果文件头只有 4 列但数据有 7 列，readtable 可能会忽略后面
-    % 这里假设用户可能需要手动处理或重新运行，或者我们尝试用 textscan 读取
     warning('FER data column not found in table. Trying to calculate from Frame Errors if available.');
     your_fer = NaN(size(your_snr));
 end
 
 your_ber(your_ber == 0) = NaN;
 your_fer(your_fer == 0) = NaN;
-
-% 由 BER 估计 FER (假设误码独立分布 - 上界估计)
-% FER_est = 1 - (1 - BER)^K
-K_ccsds = 1784;
-your_fer_est = 1 - (1 - your_ber).^K_ccsds;
 
 %% === NASA 基准数据 Table A-4 (K=1784, R=1/3) ===
 % 这是 FER 数据
@@ -56,11 +49,6 @@ semilogy(nasa_1784_snr, nasa_1784_fer, '--s', 'Color', [0.0 0.4 0.8], ...
 semilogy(your_snr, your_fer, '-^', 'Color', [0.2 0.7 0.2], ...
     'LineWidth', 2.0, 'MarkerSize', 9, 'MarkerFaceColor', [0.2 0.7 0.2], ...
     'DisplayName', 'Our CCSDS (FER)');
-
-% BER 推导的 FER (虚线) - 紫色
-semilogy(your_snr, your_fer_est, '--x', 'Color', [0.6 0.2 0.8], ...
-    'LineWidth', 1.5, 'MarkerSize', 8, ...
-    'DisplayName', 'Est. FER from BER (Indep.)');
 
 % 你的实现 (BER) - 红色虚线
 semilogy(your_snr, your_ber, ':o', 'Color', [0.9 0.1 0.3], ...
