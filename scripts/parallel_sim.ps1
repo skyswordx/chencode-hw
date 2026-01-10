@@ -10,17 +10,17 @@
     Decoder type: 0=Uncoded, 1=HardViterbi, 2=SoftViterbi, 3=BCJR, 4=Turbo
     
 .PARAMETER StartSNR
-    Starting Eb/N0 in dB (e.g., -1.0)
-    
+    Starting Eb/N0 in dB
+
 .PARAMETER EndSNR
-    Ending Eb/N0 in dB (e.g., 4.0)
-    
+    Ending Eb/N0 in dB
+
 .PARAMETER Step
-    SNR step size in dB (e.g., 0.5)
-    
+    SNR step size in dB
+
 .PARAMETER Frames
-    Number of frames per SNR point (e.g., 50000)
-    
+    Number of frames per SNR point
+
 .PARAMETER Workers
     Number of parallel workers (default: auto-detect based on CPU cores)
     
@@ -48,29 +48,22 @@ param(
     [int]$Workers = 0
 )
 
-# =================================================================
 # Configuration
-# =================================================================
-
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 $ExePath = Join-Path $ProjectRoot "chencode_sim.exe"
 $OutputDir = Join-Path $ProjectRoot "output"
 $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 
-# Decoder names for display
 $DecoderNames = @(
-    "Uncoded BPSK",
-    "Hard Viterbi (CC R=1/2)",
-    "Soft Viterbi (CC R=1/2)",
-    "BCJR / MAP (CC R=1/2)",
-    "Turbo (Log-MAP, PCCC R=1/3)"
+    "Uncoded_BPSK",
+    "Hard_Viterbi",
+    "Soft_Viterbi",
+    "BCJR_MAP",
+    "Turbo_LogMAP"
 )
 
-# =================================================================
 # System Detection
-# =================================================================
-
 function Get-SystemInfo {
     $cpu = Get-CimInstance -ClassName Win32_Processor
     $cpuName = $cpu.Name.Trim()
@@ -86,18 +79,15 @@ function Get-SystemInfo {
     }
 }
 
-# =================================================================
 # SNR Point Distribution
-# =================================================================
-
 function Get-SNRPoints {
-    param([float]$Start, [float]$End, [float]$Step)
+    param([float]$Start, [float]$End, [float]$StepSize)
     
     $points = @()
     $snr = $Start
     while ($snr -le $End + 0.001) {
         $points += [math]::Round($snr, 2)
-        $snr += $Step
+        $snr += $StepSize
     }
     return $points
 }
@@ -127,21 +117,17 @@ function Split-SNRPoints {
     return $chunks
 }
 
-# =================================================================
 # Progress Monitoring
-# =================================================================
-
 function Get-PartialProgress {
-    param([string]$CsvFile, [int]$ExpectedPoints)
+    param([string]$CsvFile)
     
     if (-not (Test-Path $CsvFile)) {
         return 0
     }
     
     try {
-        $lines = Get-Content $CsvFile -ErrorAction SilentlyContinue | Where-Object { $_ -notmatch "^#" -and $_.Trim() -ne "" }
-        $dataLines = ($lines | Measure-Object).Count - 1  # Subtract header
-        if ($dataLines -lt 0) { $dataLines = 0 }
+        $content = Get-Content $CsvFile -ErrorAction SilentlyContinue
+        $dataLines = ($content | Where-Object { $_ -notmatch "^#" -and $_.Trim() -ne "" -and $_ -notmatch "Eb_N0" }).Count
         return $dataLines
     } catch {
         return 0
@@ -159,60 +145,59 @@ function Show-Progress {
     $startTime = Get-Date
     
     while (-not $allDone) {
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds 3
         
         $totalExpected = 0
         $totalCompleted = 0
-        $statusLines = @()
+        
+        Write-Host ""
+        $elapsed = (Get-Date) - $startTime
+        $elapsedStr = "{0:hh\:mm\:ss}" -f $elapsed
+        Write-Host "  Progress (Elapsed: $elapsedStr):" -ForegroundColor Cyan
         
         for ($i = 0; $i -lt $Chunks.Count; $i++) {
             $expected = $Chunks[$i].Points.Count
-            $completed = Get-PartialProgress -CsvFile $OutputFiles[$i] -ExpectedPoints $expected
+            $completed = Get-PartialProgress -CsvFile $OutputFiles[$i]
             $totalExpected += $expected
             $totalCompleted += $completed
             
             $proc = $Processes[$i]
-            $status = if ($proc.HasExited) { "Done" } else { "Running" }
-            $pct = if ($expected -gt 0) { [math]::Round(100 * $completed / $expected) } else { 0 }
+            if ($proc.HasExited) {
+                $status = "Done"
+            } else {
+                $status = "Running"
+            }
             
-            $statusLines += "    [Worker $i] SNR $($Chunks[$i].StartSNR) to $($Chunks[$i].EndSNR): $completed/$expected points ($pct%) - $status"
+            $pct = 0
+            if ($expected -gt 0) {
+                $pct = [math]::Round(100 * $completed / $expected)
+            }
+            
+            $snrS = $Chunks[$i].StartSNR
+            $snrE = $Chunks[$i].EndSNR
+            Write-Host "    Worker $i : SNR $snrS to $snrE : $completed / $expected pts ($pct pct) - $status"
         }
         
-        # Clear previous lines and print status
-        $elapsed = (Get-Date) - $startTime
-        $elapsedStr = "{0:hh\:mm\:ss}" -f $elapsed
-        
-        Write-Host "`r`n  Progress (Elapsed: $elapsedStr):" -ForegroundColor Cyan
-        foreach ($line in $statusLines) {
-            Write-Host $line
+        $overallPct = 0
+        if ($totalExpected -gt 0) {
+            $overallPct = [math]::Round(100 * $totalCompleted / $totalExpected)
         }
+        Write-Host "    TOTAL: $totalCompleted / $totalExpected pts ($overallPct pct)" -ForegroundColor Yellow
         
-        $overallPct = if ($totalExpected -gt 0) { [math]::Round(100 * $totalCompleted / $totalExpected) } else { 0 }
-        Write-Host "    [Total] $totalCompleted/$totalExpected points ($overallPct%)" -ForegroundColor Yellow
-        
-        # Check if all processes are done
-        $allDone = ($Processes | Where-Object { -not $_.HasExited } | Measure-Object).Count -eq 0
-        
-        if (-not $allDone) {
-            # Move cursor up to overwrite progress
-            $linesToMove = $Chunks.Count + 3
-            Write-Host "`e[$($linesToMove)A" -NoNewline
-        }
+        $running = ($Processes | Where-Object { -not $_.HasExited }).Count
+        $allDone = ($running -eq 0)
     }
     
     return $elapsed
 }
 
-# =================================================================
 # CSV Merging
-# =================================================================
-
 function Merge-CSVFiles {
     param(
         [string[]]$InputFiles,
         [string]$OutputFile,
         [string]$DecoderName,
-        [int]$TotalFrames
+        [long]$TotalFrames
     )
     
     $allData = @()
@@ -228,10 +213,8 @@ function Merge-CSVFiles {
         }
     }
     
-    # Sort by SNR (first column)
     $sortedData = $allData | Sort-Object { [float]($_ -split ",")[0] }
     
-    # Write merged file
     $header = @(
         "# Channel Coding Simulation Results (Merged)",
         "# Decoder: $DecoderName",
@@ -247,30 +230,11 @@ function Merge-CSVFiles {
     return $sortedData.Count
 }
 
-# =================================================================
-# Main Execution
-# =================================================================
+# === Main Execution ===
 
-# Print CHENCODE ASCII art banner with gradient colors
-Write-Host ""
-Write-Host ""
-Write-Host "   " -NoNewline; Write-Host "*" -ForegroundColor DarkYellow -NoNewline; Write-Host " Welcome to " -NoNewline; Write-Host "Chencode Parallel Runner" -ForegroundColor White
-Write-Host ""
-
-# CHENCODE ASCII Art (matching main.c style)
-Write-Host "    ██████╗██╗  ██╗███████╗███╗   ██╗ ██████╗ ██████╗ ██████╗ ███████╗" -ForegroundColor DarkYellow
-Write-Host "   ██╔════╝██║  ██║██╔════╝████╗  ██║██╔════╝██╔═══██╗██╔══██╗██╔════╝" -ForegroundColor Yellow
-Write-Host "   ██║     ███████║█████╗  ██╔██╗ ██║██║     ██║   ██║██║  ██║█████╗  " -ForegroundColor Green
-Write-Host "   ██║     ██╔══██║██╔══╝  ██║╚██╗██║██║     ██║   ██║██║  ██║██╔══╝  " -ForegroundColor Cyan
-Write-Host "   ╚██████╗██║  ██║███████╗██║ ╚████║╚██████╗╚██████╔╝██████╔╝███████╗" -ForegroundColor Blue
-Write-Host "    ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝" -ForegroundColor DarkCyan
-
-Write-Host ""
-Write-Host "                    Channel Coding Parallel Simulator"
-Write-Host "                 (7,5)_8 Convolutional & PCCC Turbo Codes"
 Write-Host ""
 Write-Host "  ================================================================" -ForegroundColor Cyan
-Write-Host "              Multi-Process Parallel Execution Mode" -ForegroundColor Cyan
+Write-Host "           CHENCODE Parallel Simulation Runner" -ForegroundColor Cyan
 Write-Host "  ================================================================" -ForegroundColor Cyan
 
 # Check executable exists
@@ -293,7 +257,7 @@ if ($Workers -eq 0) {
 Write-Host "  [Config] Using $Workers parallel workers" -ForegroundColor Green
 
 # Calculate SNR points
-$snrPoints = Get-SNRPoints -Start $StartSNR -End $EndSNR -Step $Step
+$snrPoints = Get-SNRPoints -Start $StartSNR -End $EndSNR -StepSize $Step
 Write-Host "  [Config] $($snrPoints.Count) SNR points: $StartSNR to $EndSNR dB (step $Step)"
 Write-Host "  [Config] $Frames frames per SNR point"
 Write-Host "  [Config] Decoder: $($DecoderNames[$Decoder])"
@@ -309,8 +273,12 @@ $actualWorkers = $chunks.Count
 
 Write-Host ""
 Write-Host "  [Info] Work distribution:" -ForegroundColor Yellow
-foreach ($chunk in $chunks) {
-    Write-Host "    Worker $($chunk.WorkerId): SNR $($chunk.StartSNR) to $($chunk.EndSNR) ($($chunk.Points.Count) points)"
+for ($w = 0; $w -lt $chunks.Count; $w++) {
+    $c = $chunks[$w]
+    $ss = $c.StartSNR
+    $se = $c.EndSNR
+    $np = $c.Points.Count
+    Write-Host "    Worker $w : SNR $ss to $se ($np points)"
 }
 
 # Prepare output files and processes
@@ -327,16 +295,15 @@ for ($i = 0; $i -lt $actualWorkers; $i++) {
     
     $seed = 10000 + $i * 1000 + (Get-Random -Maximum 999)
     
-    $args = "--batch --decoder $Decoder --snr $($chunk.StartSNR) $($chunk.EndSNR) $Step --frames $Frames --output `"$outFile`" --seed $seed --quiet"
+    $cmdArgs = "--batch --decoder $Decoder --snr $($chunk.StartSNR) $($chunk.EndSNR) $Step --frames $Frames --output `"$outFile`" --seed $seed --quiet"
     
-    $proc = Start-Process -FilePath $ExePath -ArgumentList $args -PassThru -WindowStyle Hidden
+    $proc = Start-Process -FilePath $ExePath -ArgumentList $cmdArgs -PassThru -WindowStyle Hidden
     $processes += $proc
     
-    Write-Host "    [Worker $i] PID $($proc.Id) started"
+    Write-Host "    Worker $i : PID $($proc.Id) started"
 }
 
 # Monitor progress
-Write-Host ""
 $elapsed = Show-Progress -Processes $processes -Chunks $chunks -OutputFiles $outputFiles
 
 # Wait for all processes to complete
@@ -346,7 +313,7 @@ Write-Host ""
 Write-Host "  [Done] All workers completed!" -ForegroundColor Green
 
 # Merge results
-$mergedFile = Join-Path $OutputDir "ber_$($DecoderNames[$Decoder] -replace '[^a-zA-Z0-9]', '_')_${Timestamp}_merged.csv"
+$mergedFile = Join-Path $OutputDir ("ber_" + $DecoderNames[$Decoder] + "_" + $Timestamp + "_merged.csv")
 Write-Host "  [Merge] Combining results..." -ForegroundColor Cyan
 
 $dataPoints = Merge-CSVFiles -InputFiles $outputFiles -OutputFile $mergedFile -DecoderName $DecoderNames[$Decoder] -TotalFrames $Frames
@@ -367,8 +334,4 @@ Write-Host "  ================================================================" 
 Write-Host "    Total time:    $elapsedStr"
 Write-Host "    Data points:   $dataPoints"
 Write-Host "    Output file:   $mergedFile"
-Write-Host ""
-Write-Host "    MATLAB import:" -ForegroundColor Yellow
-Write-Host "    data = readtable('$mergedFile', 'CommentStyle', '#');"
-Write-Host "    semilogy(data.Eb_N0, data.BER, '-o');"
 Write-Host ""

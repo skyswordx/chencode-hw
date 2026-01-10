@@ -199,6 +199,10 @@ void run_turbo_simulation_v2(SimConfig* cfg, FILE* csv_fp) {
     long int bit_error, seq;
     double BER;
     
+    // Early termination threshold - stop when this many errors are collected
+    // This provides statistically significant BER estimates while saving time
+    const long MIN_ERRORS = 100;
+    
     // 生成交织器 (仅一次)
     turbo_generate_interleaver();
     
@@ -210,6 +214,7 @@ void run_turbo_simulation_v2(SimConfig* cfg, FILE* csv_fp) {
         sgm = sqrt(N0 / 2.0);
         
         bit_error = 0;
+        long actual_frames = 0;
         
         for (seq = 1; seq <= cfg->num_frames; seq++) {
             turbo_generate_message();
@@ -218,9 +223,16 @@ void run_turbo_simulation_v2(SimConfig* cfg, FILE* csv_fp) {
             turbo_channel();
             turbo_decoder_wrapper();
             bit_error += turbo_check_errors();
+            actual_frames = seq;
+            
+            // Early termination: stop if we have enough errors for statistical significance
+            if (bit_error >= MIN_ERRORS && seq >= 1000) {
+                // Only terminate early if we've run at least 1000 frames
+                break;
+            }
             
             // Progress indicator every 1000 frames
-            if (seq % 1000 == 0 || seq == cfg->num_frames) {
+            if (seq % 1000 == 0) {
                 printf("\r  [SNR=%.1fdB] Frame %ld/%ld (%.1f%%) - Errors: %ld   ", 
                        SNR, seq, cfg->num_frames, 
                        100.0 * seq / cfg->num_frames, bit_error);
@@ -229,7 +241,8 @@ void run_turbo_simulation_v2(SimConfig* cfg, FILE* csv_fp) {
         }
         printf("\r                                                              \r"); // Clear progress line
         
-        long total_bits = (long)TURBO_MESSAGE_BITS * cfg->num_frames;
+        // Use actual frames simulated for BER calculation
+        long total_bits = (long)TURBO_MESSAGE_BITS * actual_frames;
         BER = (double)bit_error / (double)total_bits;
         
         print_result_row(SNR, bit_error, total_bits, BER);
