@@ -1,125 +1,118 @@
-%% BER vs Eb/N0 Comparison Plot
-% 信道编码仿真结果绘图脚本
-% 使用方法：修改 filenames 数组，指向你的 CSV 文件
-%
-% CSV 文件格式要求：
-%   - 表头行: SNR_dB,Bit_Errors,Total_Bits,BER
-%   - 支持 # 开头的注释行
+%% Turbo Code BER Performance Plot
+% 绘制完整的 Turbo 码仿真结果曲线（包含瀑布区和错误平层）
+% 数据来源：ber_turbo_complete.csv
 
 clear; close all; clc;
 
-%% === 配置区域 ===
-% 修改这里的文件名以匹配你的 CSV 文件
+%% === 读取 CSV 数据 ===
 data_dir = '../output/';
+target_file = 'ber_turbo_complete.csv';
+filepath = fullfile(data_dir, target_file);
 
-% 自动搜索 output 目录下的所有 CSV 文件
-csv_files = dir(fullfile(data_dir, 'ber_*.csv'));
+fprintf('正在读取: %s\n', target_file);
+data = readtable(filepath, 'CommentStyle', '#');
 
-% 手动指定文件（如果不想自动搜索）
-% filenames = {
-%     'ber_uncoded_*.csv',
-%     'ber_hard_viterbi_*.csv', 
-%     'ber_soft_viterbi_*.csv',
-%     'ber_bcjr_*.csv',
-%     'ber_turbo_*.csv'
-% };
+% 提取数据
+snr_db = data.SNR_dB;
+ber = data.BER;
 
-% 标签与样式
-style_map = containers.Map();
-style_map('uncoded')      = struct('label', 'Uncoded BPSK (Theory)', 'style', '--k', 'marker', 'none');
-style_map('hard_viterbi') = struct('label', 'Hard Viterbi', 'style', '-r', 'marker', 'o');
-style_map('soft_viterbi') = struct('label', 'Soft Viterbi', 'style', '-b', 'marker', 's');
-style_map('bcjr')         = struct('label', 'BCJR (Log-MAP)', 'style', '-g', 'marker', '^');
-style_map('turbo')        = struct('label', 'Turbo (8 iter)', 'style', '-m', 'marker', 'd');
+% 过滤掉 BER=0 的点（无法在对数坐标显示）
+valid_idx = ber > 0;
+snr_db = snr_db(valid_idx);
+ber = ber(valid_idx);
+
+fprintf('数据范围: SNR = [%.1f, %.1f] dB, 共 %d 个有效数据点\n', ...
+    min(snr_db), max(snr_db), length(snr_db));
 
 %% === 理论曲线计算 ===
-EbN0_dB = 0:0.5:10;
-EbN0 = 10.^(EbN0_dB/10);
-BER_theory = 0.5 * erfc(sqrt(EbN0));
+% Uncoded BPSK 理论曲线
+EbN0_dB_theory = -2:0.2:8;
+EbN0_theory = 10.^(EbN0_dB_theory/10);
+BER_uncoded = 0.5 * erfc(sqrt(EbN0_theory));
 
 %% === 绘图 ===
-figure('Position', [100 100 900 650], 'Color', 'white');
-hold on; grid on;
+figure('Position', [100 100 1000 700], 'Color', 'white');
 
-% 绘制理论曲线
-semilogy(EbN0_dB, BER_theory, '-.', 'Color', [0.5 0.5 0.5], ...
+% 绘制 Uncoded BPSK 理论曲线
+semilogy(EbN0_dB_theory, BER_uncoded, '-.', 'Color', [0.6 0.6 0.6], ...
     'LineWidth', 1.5, 'DisplayName', 'Uncoded BPSK (Theory)');
+hold on;
 
-% 读取并绘制每个 CSV 文件
-legend_entries = {'Uncoded BPSK (Theory)'};
+% 绘制 Turbo 码仿真曲线
+semilogy(snr_db, ber, '-', 'LineWidth', 2.5, 'Color', [0.8 0.2 0.6], ...
+    'Marker', 'd', 'MarkerSize', 8, 'MarkerFaceColor', [0.8 0.2 0.6], ...
+    'DisplayName', 'Turbo Code (R=1/3, 8 iter)');
 
-for i = 1:length(csv_files)
-    filepath = fullfile(data_dir, csv_files(i).name);
-    
-    try
-        % 使用 readtable 读取 (支持注释行)
-        data = readtable(filepath, 'CommentStyle', '#');
-        
-        % 提取译码器类型 (从文件名)
-        name_parts = strsplit(csv_files(i).name, '_');
-        if length(name_parts) >= 2
-            decoder_type = name_parts{2};
-            % 处理带时间戳的文件名 (ber_soft_viterbi_20260109_...)
-            if any(strcmp(decoder_type, {'soft', 'hard'})) && length(name_parts) >= 3
-                decoder_type = [name_parts{2} '_' name_parts{3}];
-            end
-        else
-            decoder_type = 'unknown';
-        end
-        
-        % 获取样式
-        if isKey(style_map, decoder_type)
-            s = style_map(decoder_type);
-            semilogy(data.SNR_dB, data.BER, s.style, ...
-                'LineWidth', 1.5, 'MarkerSize', 7, ...
-                'MarkerFaceColor', 'auto', 'DisplayName', s.label);
-            legend_entries{end+1} = s.label;
-        else
-            % 默认样式
-            semilogy(data.SNR_dB, data.BER, '-', ...
-                'LineWidth', 1.5, 'DisplayName', decoder_type);
-            legend_entries{end+1} = decoder_type;
-        end
-        
-        fprintf('已加载: %s\n', csv_files(i).name);
-    catch ME
-        fprintf('无法读取 %s: %s\n', csv_files(i).name, ME.message);
-    end
-end
+%% === 标注瀑布区和错误平层 ===
+% 瀑布区标注
+text(0.5, 1e-2, 'Waterfall Region', 'FontSize', 12, 'FontWeight', 'bold', ...
+    'Color', [0.2 0.4 0.8], 'Rotation', -60);
+
+% 错误平层标注
+text(4, 5e-8, 'Error Floor Region', 'FontSize', 12, 'FontWeight', 'bold', ...
+    'Color', [0.8 0.2 0.2]);
+
+% 绘制错误平层参考线
+yline(1e-7, '--', 'Color', [0.5 0.5 0.5], 'LineWidth', 1, ...
+    'Label', 'BER = 10^{-7}', 'LabelHorizontalAlignment', 'left');
 
 %% === 图表美化 ===
 xlabel('$E_b/N_0$ (dB)', 'FontSize', 14, 'Interpreter', 'latex');
-ylabel('BER', 'FontSize', 14);
-title({'BER Performance: $(7,5)_8$ Convolutional Code, $R=1/2$', ...
-       'Block size $k=1024$ bits | AWGN Channel | BPSK Modulation'}, ...
-       'FontSize', 14, 'Interpreter', 'latex');
+ylabel('Bit Error Rate (BER)', 'FontSize', 14, 'Interpreter', 'latex');
+title({'Turbo Code BER Performance with Error Floor', ...
+    'PCCC $R=1/3$, Block size $k=1024$ bits, 8 iterations, AWGN Channel'}, ...
+    'FontSize', 14, 'Interpreter', 'latex');
 
 legend('Location', 'southwest', 'FontSize', 11);
+grid on;
 
 % 设置坐标轴范围
-xlim([0 10]);
-ylim([1e-7 1]);
+xlim([-2 8]);
+ylim([1e-9 1]);
 
 % 设置刻度
 set(gca, 'YScale', 'log');
 set(gca, 'FontSize', 12);
-set(gca, 'LineWidth', 1);
-
-% 添加 minor grid
 ax = gca;
 ax.YMinorGrid = 'on';
 ax.YMinorTick = 'on';
+ax.XMinorGrid = 'on';
+
+%% === 添加编码增益标注 ===
+% 在 BER = 1e-5 处计算编码增益
+target_ber = 1e-5;
+
+% Uncoded: BER = 0.5*erfc(sqrt(EbN0)) => 需要数值求解
+EbN0_uncoded_at_target = fzero(@(x) 0.5*erfc(sqrt(10^(x/10))) - target_ber, 9);
+
+% 从仿真数据插值获取 Turbo 码在目标 BER 处的 SNR
+if min(ber) < target_ber && max(ber) > target_ber
+    EbN0_turbo_at_target = interp1(log10(ber), snr_db, log10(target_ber), 'linear');
+    coding_gain = EbN0_uncoded_at_target - EbN0_turbo_at_target;
+    
+    % 添加编码增益文本
+    text(-1, 2e-8, sprintf('Coding Gain \\approx %.1f dB @ BER=10^{-5}', coding_gain), ...
+        'FontSize', 12, 'FontWeight', 'bold', 'Color', [0.1 0.5 0.1], ...
+        'BackgroundColor', 'white', 'EdgeColor', [0.1 0.5 0.1]);
+    
+    fprintf('\n编码增益 @ BER=1e-5: %.2f dB\n', coding_gain);
+end
 
 %% === 保存图片 ===
-% 保存为 PNG
-saveas(gcf, fullfile(data_dir, 'ber_comparison.png'));
+output_fig = fullfile(data_dir, 'ber_turbo_complete_plot.png');
+saveas(gcf, output_fig);
 
-% 保存为 PDF (矢量图，适合论文)
-% exportgraphics(gcf, fullfile(data_dir, 'ber_comparison.pdf'), 'ContentType', 'vector');
+% 保存高分辨率版本
+print(gcf, fullfile(data_dir, 'ber_turbo_complete_plot_hires.png'), '-dpng', '-r300');
 
-fprintf('\n绘图完成！已保存到: %s\n', fullfile(data_dir, 'ber_comparison.png'));
+fprintf('\n绘图完成！已保存到:\n  - %s\n  - %s\n', output_fig, ...
+    fullfile(data_dir, 'ber_turbo_complete_plot_hires.png'));
 
-%% === 可选：生成表格数据 ===
-% 打印 LaTeX 格式表格
-fprintf('\n=== LaTeX 表格数据 ===\n');
-fprintf('$E_b/N_0$ (dB) & Uncoded & Hard Viterbi & Soft Viterbi & BCJR \\\\ \\hline\n');
+%% === 打印数据摘要 ===
+fprintf('\n=== 仿真数据摘要 ===\n');
+fprintf('%-10s %-15s %-15s %-15s\n', 'SNR (dB)', 'Bit Errors', 'Total Bits', 'BER');
+fprintf('%s\n', repmat('-', 1, 55));
+for i = 1:length(snr_db)
+    fprintf('%-10.1f %-15d %-15d %-15.2e\n', ...
+        snr_db(i), data.Bit_Errors(valid_idx), data.Total_Bits(valid_idx), ber(i));
+end

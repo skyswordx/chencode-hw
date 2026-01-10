@@ -206,7 +206,8 @@ function Merge-CSVFiles {
         if (Test-Path $file) {
             $content = Get-Content $file
             foreach ($line in $content) {
-                if ($line -notmatch "^#" -and $line.Trim() -ne "" -and $line -notmatch "Eb_N0") {
+                # Skip comments, empty lines, and header rows
+                if ($line -notmatch "^#" -and $line.Trim() -ne "" -and $line -notmatch "Eb_N0" -and $line -notmatch "SNR_dB") {
                     $allData += $line
                 }
             }
