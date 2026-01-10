@@ -5,7 +5,7 @@
 clear; close all; clc;
 
 %% === 读取 CSV 数据 ===
-data_dir = '../output/';
+data_dir = '.';
 target_file = 'ber_turbo_complete.csv';
 filepath = fullfile(data_dir, target_file);
 
