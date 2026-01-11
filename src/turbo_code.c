@@ -96,7 +96,7 @@ void component_rsc_encoder(int* input_msg, int* output_parity) {
     for (int i = 0; i < TURBO_message_length; i++) {
         int f = input_msg[i] ^ s0 ^ s1; // 反馈 (来自 1+D+D^2)
         
-        // ** [BUG 1 修复] **
+        // [BUG 1 修复] 
         // 错误代码: output_parity[i] = input_msg[i] ^ s1;
         // 校验位必须由反馈位 f 产生，而不是输入位 m
         output_parity[i] = f ^ s1;      // 校验 (来自 1+D^2)
