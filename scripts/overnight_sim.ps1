@@ -144,7 +144,7 @@ while ($true) {
         $psArgs += $simArgs[$k]
     }
     
-    $p = Start-Process -FilePath "powershell" -ArgumentList "-ExecutionPolicy Bypass -File `"$ParallelSimPath`" $psArgs" -Wait -PassThru
+    $p = Start-Process -FilePath "powershell" -ArgumentList "-ExecutionPolicy Bypass -File `"$ParallelSimPath`" $psArgs" -Wait -PassThru -NoNewWindow
     
     # Find the newly created merged CSV (parallel_sim creates one)
     $latestCsv = Get-ChildItem -Path $OutputDir -Filter "ber_*_merged.csv" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
