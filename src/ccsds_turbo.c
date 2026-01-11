@@ -334,22 +334,21 @@ void ccsds_turbo_encoder(void) {
             }
         }
         
-        // TAIL Part (CCSDS 131.0-B-5 7.2.3):
-        // 16 bits total overhead. All tails are transmitted.
-        // Seq: t1_i, p1_i for i=0..3; then t2_i, p2_i for i=0..3
-        // Notice: R=1/2 spec usually transmits tails fully or with separate pattern?
-        // Standard says: "The termination bits are... muxed...". 
-        // Usually implementation: Transmit ALL termination bits to ensure closure.
-        // Checked NASA standard: R=1/2 also transmits systematic tail bits.
-        // We will transmit (t1, p1) then (t2, p2).
+        // TAIL Part (CCSDS 131.0-B-5 Standard, R=1/2 Punctured Tail):
+        // Total 4 termination steps * 2 bits/step = 8 bits.
+        // Pattern matches data block: (Sys, P1) -> (Sys, P2) -> (Sys, P1) -> (Sys, P2)
+        // Note: Systematic Bit is ALWAYS from Encoder 1 (Switch bits t1)
         
         for (int i = 0; i < 4; i++) {
-            ccsds_codeword[k++] = tail_sys1[i];
-            ccsds_codeword[k++] = tail_par1[i];
-        }
-         for (int i = 0; i < 4; i++) {
-            ccsds_codeword[k++] = tail_sys2[i];
-            ccsds_codeword[k++] = tail_par2[i];
+            ccsds_codeword[k++] = tail_sys1[i]; // Always Enc1 Switch Bit
+            
+            if (i % 2 == 0) {
+                // T1, T3 (Even): Send Parity 1
+                ccsds_codeword[k++] = tail_par1[i];
+            } else {
+                // T2, T4 (Odd): Send Parity 2
+                ccsds_codeword[k++] = tail_par2[i];
+            }
         }
 
     } else {
@@ -361,38 +360,18 @@ void ccsds_turbo_encoder(void) {
             ccsds_codeword[k++] = parity2[i];              // p2
         }
         
-        // TAIL Part:
-        // Format: (t1, p1) x 4, then (t2, p2) x 4
-        // Note: For R=1/3, the standard structure often implies u, p1, p2. 
-        // But for tails, Encoder 2's systematic bits (t2) are NOT u. They are distinct.
-        // Standard (7.2.3):
-        // "Termination ... output sequence shall be... 
-        //  (t1_0, p1_0, t1_1, p1_1 ...) followed by (t2_0, p2_0 ...)"
-        // It does NOT interleave t1 and t2. They are blocked at the end.
+        // TAIL Part (Full Tail):
+        // Send all termination bits from both encoders (4*2 + 4*2 = 16 bits)
+        // Seq: (t1, p1) block followed by (t2, p2) block
         
          for (int i = 0; i < 4; i++) {
             ccsds_codeword[k++] = tail_sys1[i];
             ccsds_codeword[k++] = tail_par1[i];
-            // Paradox: R=1/3 expects 3 bits per step? 
-            // Actually, the tail handling in CCSDS is unique. 
-            // It breaks the "3 bits" symmetry. 
-            // The standard defines the output stream specifically.
-            // Let's assume the decoder expects exactly this sequence.
         }
          for (int i = 0; i < 4; i++) {
             ccsds_codeword[k++] = tail_sys2[i];
             ccsds_codeword[k++] = tail_par2[i];
         }
-        // Be careful: The R=1/3 channel assumes constant rate? 
-        // If we only send 2 bits per tail step, rate changes?
-        // Actually for R=1/3, usually we send (t1, p1, p2=0?) No.
-        // CCSDS spec is explicit: 
-        // "Terminating Sequence: ... 24 bits ... or 16 bits?"
-        // Spec 131.0-B-5:
-        // "Tail sequence length is 16 bits for Rate 1/2, 24 bits for Rate 1/3 (Wait?)"
-        // Let's re-read carefully or stick to common practice (send all switch/parity).
-        // Actually, for R=1/3, we might need dummy bits or just send the 16 bits valid.
-        // Given our channel model reads serially, 16 bits is fine as long as decoder knows.
     }
     
     // 更新实际码字长度
@@ -664,15 +643,51 @@ void ccsds_turbo_decoder(void) {
         }
     }
     
-    // B. 读取 Tail 部分 (16 bits total: 8 for Dec1, 8 for Dec2)
-    // Encoder logic: (t1, p1) x 4, (t2, p2) x 4
-    for (int i = 0; i < 4; i++) {
-        tail1_sys[i] = Lc_factor * ccsds_rx_symbol[k++][0];
-        tail1_par[i] = Lc_factor * ccsds_rx_symbol[k++][0];
-    }
-    for (int i = 0; i < 4; i++) {
-        tail2_sys[i] = Lc_factor * ccsds_rx_symbol[k++][0];
-        tail2_par[i] = Lc_factor * ccsds_rx_symbol[k++][0];
+    // B. 读取 Tail 部分
+    if (g_ccsds_rate == CCSDS_RATE_1_2) {
+        // === R=1/2 Punctured Tail (8 bits) ===
+        // Received: 4 pairs of (Sys_1, Par_X)
+        // Sys_1 is always present. Parity alternates P1, P2.
+        
+        for (int i = 0; i < 4; i++) {
+            double rx_sys = Lc_factor * ccsds_rx_symbol[k++][0];
+            double rx_par = Lc_factor * ccsds_rx_symbol[k++][0];
+            
+            // --- Decoder 1 Inputs ---
+            tail1_sys[i] = rx_sys; // Always present (Enc1 Switch)
+            
+            if (i % 2 == 0) {
+                // T1, T3 (Even): P1 sent
+                tail1_par[i] = rx_par;
+            } else {
+                // T2, T4 (Odd): P1 punctured
+                tail1_par[i] = 0.0;
+            }
+            
+            // --- Decoder 2 Inputs ---
+            // Sys: Enc2 Switch bits are never sent in R=1/2 -> 0.0 (Unknown)
+            tail2_sys[i] = 0.0;
+            
+            // Par:
+            if (i % 2 == 0) {
+                // T1, T3 (Even): P2 punctured
+                tail2_par[i] = 0.0;
+            } else {
+                // T2, T4 (Odd): P2 sent
+                tail2_par[i] = rx_par;
+            }
+        }
+    } else {
+        // === R=1/3 Full Tail (16 bits) ===
+        // Encoder logic: (t1, p1) x 4, (t2, p2) x 4
+        for (int i = 0; i < 4; i++) {
+            tail1_sys[i] = Lc_factor * ccsds_rx_symbol[k++][0];
+            tail1_par[i] = Lc_factor * ccsds_rx_symbol[k++][0];
+        }
+        for (int i = 0; i < 4; i++) {
+            tail2_sys[i] = Lc_factor * ccsds_rx_symbol[k++][0];
+            tail2_par[i] = Lc_factor * ccsds_rx_symbol[k++][0];
+        }
     }
 
     // 2. 初始化先验信息
