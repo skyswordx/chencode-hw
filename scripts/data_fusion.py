@@ -5,7 +5,7 @@ import glob
 from collections import defaultdict
 
 # Configuration
-INPUT_DIR = r'd:\Musii-SnapShot\GithubRepo\chencode-hw\overnight_output'
+INPUT_DIR = r'd:\Musii-SnapShot\GithubRepo\chencode-hw\output\10_error_test'
 OUTPUT_DIR = r'd:\Musii-SnapShot\GithubRepo\chencode-hw\output\fused_results'
 FILE_PATTERN = r'^(.*)_\d{8}_\d{6}(?:_merged)?\.csv$'
 
