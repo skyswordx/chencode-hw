@@ -334,21 +334,16 @@ void ccsds_turbo_encoder(void) {
             }
         }
         
-        // TAIL Part (CCSDS 131.0-B-5 Standard, R=1/2 Punctured Tail):
-        // Total 4 termination steps * 2 bits/step = 8 bits.
-        // Pattern matches data block: (Sys, P1) -> (Sys, P2) -> (Sys, P1) -> (Sys, P2)
-        // Note: Systematic Bit is ALWAYS from Encoder 1 (Switch bits t1)
-        
+        // TAIL Part (Modified: Full 16-bit tail like R=1/3 for better decoding)
+        // Send all termination bits from both encoders (4*2 + 4*2 = 16 bits)
+        // This sacrifices strict 1/2 rate in tail for reliable Dec2 termination
         for (int i = 0; i < 4; i++) {
-            ccsds_codeword[k++] = tail_sys1[i]; // Always Enc1 Switch Bit
-            
-            if (i % 2 == 0) {
-                // T1, T3 (Even): Send Parity 1
-                ccsds_codeword[k++] = tail_par1[i];
-            } else {
-                // T2, T4 (Odd): Send Parity 2
-                ccsds_codeword[k++] = tail_par2[i];
-            }
+            ccsds_codeword[k++] = tail_sys1[i];
+            ccsds_codeword[k++] = tail_par1[i];
+        }
+        for (int i = 0; i < 4; i++) {
+            ccsds_codeword[k++] = tail_sys2[i];
+            ccsds_codeword[k++] = tail_par2[i];
         }
 
     } else {
@@ -645,37 +640,15 @@ void ccsds_turbo_decoder(void) {
     
     // B. 读取 Tail 部分
     if (g_ccsds_rate == CCSDS_RATE_1_2) {
-        // === R=1/2 Punctured Tail (8 bits) ===
-        // Received: 4 pairs of (Sys_1, Par_X)
-        // Sys_1 is always present. Parity alternates P1, P2.
-        
+        // === R=1/2 Full Tail (Modified: 16 bits like R=1/3) ===
+        // Both encoders' termination bits are sent for reliable decoding
         for (int i = 0; i < 4; i++) {
-            double rx_sys = Lc_factor * ccsds_rx_symbol[k++][0];
-            double rx_par = Lc_factor * ccsds_rx_symbol[k++][0];
-            
-            // --- Decoder 1 Inputs ---
-            tail1_sys[i] = rx_sys; // Always present (Enc1 Switch)
-            
-            if (i % 2 == 0) {
-                // T1, T3 (Even): P1 sent
-                tail1_par[i] = rx_par;
-            } else {
-                // T2, T4 (Odd): P1 punctured
-                tail1_par[i] = 0.0;
-            }
-            
-            // --- Decoder 2 Inputs ---
-            // Sys: Enc2 Switch bits are never sent in R=1/2 -> 0.0 (Unknown)
-            tail2_sys[i] = 0.0;
-            
-            // Par:
-            if (i % 2 == 0) {
-                // T1, T3 (Even): P2 punctured
-                tail2_par[i] = 0.0;
-            } else {
-                // T2, T4 (Odd): P2 sent
-                tail2_par[i] = rx_par;
-            }
+            tail1_sys[i] = Lc_factor * ccsds_rx_symbol[k++][0];
+            tail1_par[i] = Lc_factor * ccsds_rx_symbol[k++][0];
+        }
+        for (int i = 0; i < 4; i++) {
+            tail2_sys[i] = Lc_factor * ccsds_rx_symbol[k++][0];
+            tail2_par[i] = Lc_factor * ccsds_rx_symbol[k++][0];
         }
     } else {
         // === R=1/3 Full Tail (16 bits) ===
