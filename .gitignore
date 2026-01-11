@@ -83,3 +83,8 @@ cfg/cpp/
 *.swp
 *.swo
 *~
+
+overnight_output/
+overnight_output_hm0110
+overnight_output_yy0110
+overnight_output_zw0110
