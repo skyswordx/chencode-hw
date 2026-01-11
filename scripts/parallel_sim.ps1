@@ -61,13 +61,19 @@ param(
     
     [string]$OutputDir = "",
     
-    [long]$SeedOffset = 0
+    [long]$SeedOffset = 0,
+
+    [string]$ExePath = ""
 )
 
 # Configuration
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
-$ExePath = Join-Path $ProjectRoot "chencode_sim.exe"
+
+if ($ExePath -eq "") {
+    $ExePath = Join-Path $ProjectRoot "chencode_sim.exe"
+}
+
 
 if ($OutputDir -eq "") {
     $OutputDir = Join-Path $ProjectRoot "output"

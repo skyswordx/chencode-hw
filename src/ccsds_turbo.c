@@ -755,7 +755,16 @@ void ccsds_turbo_decoder(void) {
 
 void run_ccsds_turbo_simulation(SimConfig* cfg, FILE* csv_fp) {
     int K = g_ccsds_k;
-    double code_rate = (double)K / (double)(K * 3);
+    // double code_rate = (double)K / (double)(K * 3); // OLD: Hardcoded R=1/3
+    
+    // 修正: 根据实际配置的码率计算 N0
+    double nominal_rate;
+    if (g_ccsds_rate == CCSDS_RATE_1_2) {
+        nominal_rate = 0.5;
+    } else {
+        nominal_rate = 1.0/3.0;
+    }
+    double code_rate = nominal_rate; // Use nominal rate for Eb/N0 definition
     
     long int bit_error, frame_error, seq;
     double BER, FER;

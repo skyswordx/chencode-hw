@@ -110,11 +110,14 @@ void log_map_decoder(double* Lc_sys, double* Lc_par, double* La_in, double* Le_o
     }
 
     // 3. 计算后向概率 (Log-Beta)
-    // 【关键修复】: 由于编码器没有做 trellis termination (归零)，
-    // 尾比特仅仅是补0数据，这不能保证结束状态是0。
-    // 因此，Beta 初始化必须设为“所有状态等概率”。
+    // 【关键修复】: CCSDS 标准要求译码器利用"已知归零"的先验知识。
+    // 对于打孔码 (R=1/2)，尾部信息严重缺失，必须依靠此强约束才能收敛。
+    // 即: Beta[End][0] = 0 (Prob=1), Beta[End][others] = -inf (Prob=0)
     for(int s=0; s<st_num; s++) {
-        log_beta[TURBO_message_length][s] = LOG_ONE; // log(1) = 0, 表示等概率
+        if (s == 0)
+            log_beta[TURBO_message_length][s] = LOG_ONE;  // Log(1.0) = 0
+        else
+            log_beta[TURBO_message_length][s] = LOG_ZERO; // Log(0.0) = -inf
     }
 
     for (int t = TURBO_message_length - 1; t >= 0; t--) {
