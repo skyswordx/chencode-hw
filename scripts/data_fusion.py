@@ -8,9 +8,9 @@ from collections import defaultdict
 # Configuration
 # ============================================================================
 # Input: Folder containing the simulation records to fuse
-INPUT_DIR = r'd:\Musii-SnapShot\GithubRepo\chencode-hw\output\10_error_test'
+INPUT_DIR = r'd:\Musii-SnapShot\GithubRepo\chencode-hw\overnight_output_A'
 # Output: Folder where fused results will be saved
-OUTPUT_DIR = r'd:\Musii-SnapShot\GithubRepo\chencode-hw\output\10_error_test\fused_results'
+OUTPUT_DIR = r'd:\Musii-SnapShot\GithubRepo\chencode-hw\overnight_output_A\fused_results'
 
 # File pattern to match: captures the base name (e.g., "ber_Turbo_LogMAP_K1784_R1-3")
 # Expects format: <base_name>_YYYYMMDD_HHMMSS[_merged].csv
