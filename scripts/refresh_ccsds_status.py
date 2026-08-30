@@ -59,12 +59,16 @@ def key_snr(x: float) -> str:
 def audit_local(path: Path) -> dict:
     if not path.exists():
         return {"error": f"missing local directory: {path}"}
-    try:
-        proc = subprocess.run([sys.executable, str(AUDIT), str(path)],
-                              capture_output=True, text=True, check=True)
-        return json.loads(proc.stdout)
-    except Exception as exc:
-        return {"error": f"local audit failed: {exc}"}
+    last = None
+    for _ in range(3):
+        try:
+            proc = subprocess.run([sys.executable, str(AUDIT), str(path)],
+                                  capture_output=True, text=True, check=True)
+            return json.loads(proc.stdout)
+        except Exception as exc:
+            last = exc
+            time.sleep(0.5)
+    return {"error": f"local audit failed after retries: {last}"}
 
 
 def parse_json_blob(text: str) -> dict:
@@ -78,13 +82,17 @@ def parse_json_blob(text: str) -> dict:
 def audit_remote(host: str, key: str, user: str, helper: str, campaign: str) -> dict:
     cmd = ["ssh.exe", "-i", key, "-o", "BatchMode=yes", "-o", "ConnectTimeout=12",
            f"{user}@{host}", f"python3 {helper} {campaign}"]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
-        if proc.returncode:
-            return {"error": f"ssh/audit exit {proc.returncode}: {proc.stderr[-500:]}"}
-        return parse_json_blob(proc.stdout)
-    except Exception as exc:
-        return {"error": f"remote audit failed: {exc}"}
+    last = None
+    for _ in range(2):
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+            if proc.returncode:
+                raise RuntimeError(f"ssh/audit exit {proc.returncode}: {proc.stderr[-500:]}")
+            return parse_json_blob(proc.stdout)
+        except Exception as exc:
+            last = exc
+            time.sleep(1)
+    return {"error": f"remote audit failed after retries: {last}"}
 
 
 def add_audit(store: dict, audit: dict, label: str, config: tuple[int, str]) -> None:
@@ -95,8 +103,17 @@ def add_audit(store: dict, audit: dict, label: str, config: tuple[int, str]) -> 
         "error": audit.get("error"),
     }
     if audit.get("error"):
+        store.setdefault("progress", {})[label] = {
+            "config": f"K={config[0]}, R={config[1]}", "total_frames": 0,
+            "by_snr": {}, "error": audit["error"]}
         return
-    for snr, row in audit.get("by_snr", {}).items():
+    by_snr = audit.get("by_snr", {})
+    store.setdefault("progress", {})[label] = {
+        "config": f"K={config[0]}, R={config[1]}",
+        "total_frames": sum(int(row.get("Total_Frames", 0)) for row in by_snr.values()),
+        "by_snr": {str(snr): int(row.get("Total_Frames", 0)) for snr, row in by_snr.items()},
+        "error": None}
+    for snr, row in by_snr.items():
         dst = store["counters"].setdefault((config, snr), {name: 0 for name in COUNTERS})
         for name in COUNTERS:
             dst[name] += int(row.get(name, 0))
@@ -115,7 +132,7 @@ def fmt(x: object, digits: int = 6) -> str:
 
 def build_snapshot() -> dict:
     snap = {"generated_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
-            "counters": {}, "sources": {}, "audits": {}, "excluded": [
+            "counters": {}, "sources": {}, "audits": {}, "progress": {}, "excluded": [
                 "output/20_ccsds_8920_r12_local: aggregate seeded/mixed; not used",
                 "output/19_ccsds_8920_r13_trimmed: pre-AFF3CT/old campaign snapshot; not used",
                 "output/24_ccsds_supplement_1784_r12_mini: old build-ccsds executable; not used",
@@ -204,6 +221,19 @@ def write_outputs(snap: dict) -> None:
         lines.append("| {K} | {rate} | {snr_db:.1f} | {status} | {bit_errors} | {total_bits} | {ber} | {frame_errors} | {total_frames} | {fer} | {green_fer} | {log10_fer_ratio} | {source} |".format(
             **{**r, "ber": fmt(r["ber"]), "fer": fmt(r["fer"]), "green_fer": fmt(r["green_fer"]),
                "log10_fer_ratio": fmt(r["log10_fer_ratio"])}))
+    lines += ["", "## 主机进度（完整分片）", "",
+              "目标帧数只作为当前运行的上限参考；达到 300 个错误帧后可能提前停止，因此完成度不是任务成功判据。", "",
+              "| 数据源 | 配置 | 已采样帧 | 目标帧上限 | 上限完成度 | 各 Eb/N0 帧数 |", "|:---|:---|---:|---:|---:|:---|"]
+    target_by_label = {
+        "local_27_clean": 5 * 3_000_000,
+        "mini_28_clean": 6 * 3_000_000,
+        "cloud_r12_new_shards": 3 * 3_000_000,
+    }
+    for label, p in snap.get("progress", {}).items():
+        total = int(p.get("total_frames", 0)); target = target_by_label.get(label)
+        pct = f"{100 * total / target:.2f}%" if target else "—"
+        by = ", ".join(f"{k}: {v}" for k, v in sorted(p.get("by_snr", {}).items(), key=lambda kv: float(kv[0]))) or "—"
+        lines.append(f"| {label} | {p['config']} | {total} | {target or '—'} | {pct} | {by} |")
     lines += ["", "## Green 数值误差摘要", "",
               "| K | R | 有 Green 参考且有实测 FER 的点 | 平均绝对 log10 误差 | 最大绝对 log10 误差 |", "|---:|:---:|---:|---:|---:|"]
     for config in POINTS:

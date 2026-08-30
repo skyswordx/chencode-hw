@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-30T16:26:30+08:00",
+  "generated_at": "2026-08-30T16:32:30+08:00",
   "counters": {
     "K=1784,R=1/2,SNR=0.6": {
       "Bit_Errors": 575954,
@@ -26,22 +26,22 @@
       "Total_Frames": 49000
     },
     "K=1784,R=1/2,SNR=1.4": {
-      "Bit_Errors": 14424,
-      "Total_Bits": 1104296000,
-      "Frame_Errors": 184,
-      "Total_Frames": 619000
+      "Bit_Errors": 15463,
+      "Total_Bits": 1198848000,
+      "Frame_Errors": 200,
+      "Total_Frames": 672000
     },
     "K=8920,R=1/2,SNR=1.1": {
       "Bit_Errors": 2786,
-      "Total_Bits": 12461240000,
+      "Total_Bits": 12809120000,
       "Frame_Errors": 35,
-      "Total_Frames": 1397000
+      "Total_Frames": 1436000
     },
     "K=8920,R=1/2,SNR=1.2": {
       "Bit_Errors": 855,
-      "Total_Bits": 10596960000,
+      "Total_Bits": 10935920000,
       "Frame_Errors": 11,
-      "Total_Frames": 1188000
+      "Total_Frames": 1226000
     },
     "K=8920,R=1/2,SNR=0.5": {
       "Bit_Errors": 4866696,
@@ -74,16 +74,16 @@
       "Total_Frames": 27000
     },
     "K=8920,R=1/2,SNR=1.0": {
-      "Bit_Errors": 34844,
-      "Total_Bits": 3050640000,
-      "Frame_Errors": 193,
-      "Total_Frames": 342000
+      "Bit_Errors": 36965,
+      "Total_Bits": 3327160000,
+      "Frame_Errors": 212,
+      "Total_Frames": 373000
     },
     "K=8920,R=1/2,SNR=1.3": {
-      "Bit_Errors": 113,
-      "Total_Bits": 7787160000,
-      "Frame_Errors": 7,
-      "Total_Frames": 873000
+      "Bit_Errors": 122,
+      "Total_Bits": 8117200000,
+      "Frame_Errors": 8,
+      "Total_Frames": 910000
     }
   },
   "sources": {
@@ -135,8 +135,8 @@
   "audits": {
     "local_27_clean": {
       "config": "K=1784, R=1/2",
-      "files": 695,
-      "valid": 683,
+      "files": 748,
+      "valid": 736,
       "bad": 12,
       "matches": {
         "0.6": true,
@@ -161,8 +161,8 @@
     },
     "mini_28_clean": {
       "config": "K=8920, R=1/2",
-      "files": 403,
-      "valid": 387,
+      "files": 434,
+      "valid": 418,
       "bad": 16,
       "matches": {
         "0.5": true,
@@ -176,13 +176,59 @@
     },
     "cloud_r12_new_shards": {
       "config": "K=8920, R=1/2",
-      "files": 3294,
-      "valid": 3247,
-      "bad": 47,
+      "files": 3409,
+      "valid": 3361,
+      "bad": 48,
       "matches": {
         "1.1": false,
         "1.2": false,
         "1.3": false
+      },
+      "error": null
+    }
+  },
+  "progress": {
+    "local_27_clean": {
+      "config": "K=1784, R=1/2",
+      "total_frames": 736000,
+      "by_snr": {
+        "0.6": 5000,
+        "0.8": 4000,
+        "1.0": 6000,
+        "1.2": 49000,
+        "1.4": 672000
+      },
+      "error": null
+    },
+    "local_24_new_shards": {
+      "config": "K=8920, R=1/2",
+      "total_frames": 211000,
+      "by_snr": {
+        "1.1": 208000,
+        "1.2": 3000
+      },
+      "error": null
+    },
+    "mini_28_clean": {
+      "config": "K=8920, R=1/2",
+      "total_frames": 418000,
+      "by_snr": {
+        "0.5": 6000,
+        "0.6": 5000,
+        "0.7": 4000,
+        "0.8": 3000,
+        "0.9": 27000,
+        "1.0": 373000
+      },
+      "error": null
+    },
+    "cloud_r12_new_shards": {
+      "config": "K=8920, R=1/2",
+      "total_frames": 3361000,
+      "by_snr": {
+        "1.1": 1228000,
+        "1.2": 1223000,
+        "1.3": 910000
       },
       "error": null
     }
@@ -271,17 +317,17 @@
       "rate": "1/2",
       "snr_db": 1.4,
       "status": "AFF3CT后有效（持续追加）",
-      "bit_errors": 14424,
-      "total_bits": 1104296000,
-      "ber": 1.3061715337192202e-05,
-      "frame_errors": 184,
-      "total_frames": 619000,
-      "fer": 0.0002972536348949919,
+      "bit_errors": 15463,
+      "total_bits": 1198848000,
+      "ber": 1.2898215620328849e-05,
+      "frame_errors": 200,
+      "total_frames": 672000,
+      "fer": 0.00029761904761904765,
       "green_fer": 0.00032503,
-      "log10_fer_ratio": -0.038796273860727544,
-      "log10_measured_fer": -3.5268728260105817,
+      "log10_fer_ratio": -0.03826272523999006,
+      "log10_measured_fer": -3.526339277389844,
       "log10_green_fer": -3.488076552149854,
-      "abs_log10_fer_error": 0.038796273860727544,
+      "abs_log10_fer_error": 0.03826272523999006,
       "source": "local_27_clean"
     },
     {
@@ -541,17 +587,17 @@
       "rate": "1/2",
       "snr_db": 1.0,
       "status": "AFF3CT后有效（持续追加）",
-      "bit_errors": 34844,
-      "total_bits": 3050640000,
-      "ber": 1.142186557574804e-05,
-      "frame_errors": 193,
-      "total_frames": 342000,
-      "fer": 0.000564327485380117,
+      "bit_errors": 36965,
+      "total_bits": 3327160000,
+      "ber": 1.1110075860493635e-05,
+      "frame_errors": 212,
+      "total_frames": 373000,
+      "fer": 0.0005683646112600537,
       "green_fer": 0.00084691,
-      "log10_fer_ratio": -0.17630605793381063,
-      "log10_measured_fer": -3.2484687970483614,
+      "log10_fer_ratio": -0.17321023176538555,
+      "log10_measured_fer": -3.245372970879936,
       "log10_green_fer": -3.0721627391145505,
-      "abs_log10_fer_error": 0.17630605793381063,
+      "abs_log10_fer_error": 0.17321023176538555,
       "source": "mini_28_clean"
     },
     {
@@ -560,16 +606,16 @@
       "snr_db": 1.1,
       "status": "AFF3CT后有效（持续追加）",
       "bit_errors": 2786,
-      "total_bits": 12461240000,
-      "ber": 2.2357325595205612e-07,
+      "total_bits": 12809120000,
+      "ber": 2.1750128033775936e-07,
       "frame_errors": 35,
-      "total_frames": 1397000,
-      "fer": 2.5053686471009305e-05,
+      "total_frames": 1436000,
+      "fer": 2.437325905292479e-05,
       "green_fer": 3.565e-05,
-      "log10_fer_ratio": -0.15318789595179066,
-      "log10_measured_fer": -4.601128361763906,
+      "log10_fer_ratio": -0.16514592974389022,
+      "log10_measured_fer": -4.613086395556006,
       "log10_green_fer": -4.447940465812116,
-      "abs_log10_fer_error": 0.15318789595179066,
+      "abs_log10_fer_error": 0.16514592974389022,
       "source": "local_24_new_shards; cloud_r12_new_shards"
     },
     {
@@ -578,16 +624,16 @@
       "snr_db": 1.2,
       "status": "AFF3CT后有效（持续追加）",
       "bit_errors": 855,
-      "total_bits": 10596960000,
-      "ber": 8.068351678217149e-08,
+      "total_bits": 10935920000,
+      "ber": 7.818272262415966e-08,
       "frame_errors": 11,
-      "total_frames": 1188000,
-      "fer": 9.259259259259259e-06,
+      "total_frames": 1226000,
+      "fer": 8.972267536704731e-06,
       "green_fer": 1.551e-05,
-      "log10_fer_ratio": -0.22403555330055466,
-      "log10_measured_fer": -5.033423755486949,
+      "log10_fer_ratio": -0.2377095828377761,
+      "log10_measured_fer": -5.047097785024171,
       "log10_green_fer": -4.809388202186395,
-      "abs_log10_fer_error": 0.22403555330055466,
+      "abs_log10_fer_error": 0.2377095828377761,
       "source": "local_24_new_shards; cloud_r12_new_shards"
     },
     {
@@ -595,17 +641,17 @@
       "rate": "1/2",
       "snr_db": 1.3,
       "status": "AFF3CT后有效（持续追加）",
-      "bit_errors": 113,
-      "total_bits": 7787160000,
-      "ber": 1.4511066935827695e-08,
-      "frame_errors": 7,
-      "total_frames": 873000,
-      "fer": 8.018327605956472e-06,
+      "bit_errors": 122,
+      "total_bits": 8117200000,
+      "ber": 1.5029813236091263e-08,
+      "frame_errors": 8,
+      "total_frames": 910000,
+      "fer": 8.791208791208792e-06,
       "green_fer": 1.228e-05,
-      "log10_fer_ratio": -0.18511457049646174,
-      "log10_measured_fer": -5.095916203691313,
+      "log10_fer_ratio": -0.14514977213429886,
+      "log10_measured_fer": -5.05595140532915,
       "log10_green_fer": -4.910801633194851,
-      "abs_log10_fer_error": 0.18511457049646174,
+      "abs_log10_fer_error": 0.14514977213429886,
       "source": "cloud_r12_new_shards"
     },
     {
