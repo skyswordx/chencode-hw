@@ -159,6 +159,10 @@ def build_snapshot() -> dict:
                              "zhangzw0170", "/home/zhangzw0170/Lab/chencode-hw/audit_single_ccsds_dir.py",
                              "/home/zhangzw0170/Lab/chencode-hw/output/30_clean_1784_r12_high_mini")
     add_audit(snap, mini_next, "mini_30_high", (1784, "1/2"))
+    mini_r13 = audit_remote("192.168.17.2", r"C:\Users\Lenovo\.ssh\id_ed25519",
+                            "zhangzw0170", "/home/zhangzw0170/Lab/chencode-hw/audit_single_ccsds_dir.py",
+                            "/home/zhangzw0170/Lab/chencode-hw/output/31_clean_1784_r13_mini")
+    add_audit(snap, mini_r13, "mini_31_r13", (1784, "1/3"))
 
     # Current final cloud campaign.  Its aggregate is seeded, so only shards
     # are audited and summed here.
@@ -257,6 +261,7 @@ def write_outputs(snap: dict) -> None:
         "cloud_r12_new_shards": 3 * 3_000_000,
         "local_30_high": 3_000_000,
         "mini_30_high": 3_000_000,
+        "mini_31_r13": 7 * 3_000_000,
     }
     for label, p in snap.get("progress", {}).items():
         total = int(p.get("total_frames", 0)); target = target_by_label.get(label)
