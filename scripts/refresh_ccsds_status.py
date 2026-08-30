@@ -170,6 +170,10 @@ def build_snapshot() -> dict:
                          "ecs-user", "/home/ecs-user/ccsds-cloud-20260830/audit_single_ccsds_dir.py",
                          "/home/ecs-user/ccsds-cloud-20260830/campaign_r12_full")
     add_audit(snap, cloud, "cloud_r12_new_shards", (8920, "1/2"))
+    cloud_supplement = audit_remote("8.138.144.13", r"E:\Main\Career\CHENLi\ccsds-test.pem",
+                                    "ecs-user", "/home/ecs-user/ccsds-cloud-20260830/audit_single_ccsds_dir.py",
+                                    "/home/ecs-user/ccsds-cloud-20260830/campaign_r12_supplement_12_13")
+    add_audit(snap, cloud_supplement, "cloud_r12_supplement", (8920, "1/2"))
 
     rows = []
     for config, snrs in POINTS.items():
@@ -259,6 +263,7 @@ def write_outputs(snap: dict) -> None:
         "local_27_clean": 5 * 3_000_000,
         "mini_28_clean": 6 * 3_000_000,
         "cloud_r12_new_shards": 3 * 3_000_000,
+        "cloud_r12_supplement": 2 * 1_000_000,
         "local_30_high": 3_000_000,
         "mini_30_high": 3_000_000,
         "mini_31_r13": 7 * 3_000_000,
