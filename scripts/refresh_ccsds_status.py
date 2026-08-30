@@ -226,6 +226,28 @@ def write_outputs(snap: dict) -> None:
         lines.append("| {K} | {rate} | {snr_db:.1f} | {status} | {bit_errors} | {total_bits} | {ber} | {frame_errors} | {total_frames} | {fer} | {green_fer} | {log10_fer_ratio} | {source} |".format(
             **{**r, "ber": fmt(r["ber"]), "fer": fmt(r["fer"]), "green_fer": fmt(r["green_fer"]),
                "log10_fer_ratio": fmt(r["log10_fer_ratio"])}))
+    # Compact completion matrix requested for quick review.  A star means the
+    # current run reached its stopping condition; a middle dot means valid
+    # AFF3CT-era data exists but the point is still being extended.
+    matrix_path = OUT / "completion_matrix.md"
+    columns = [(1784, "1/2"), (1784, "1/3"), (8920, "1/2"), (8920, "1/3")]
+    all_snrs = sorted({r["snr_db"] for r in snap["rows"]})
+    row_map = {(r["K"], r["rate"], r["snr_db"]): r for r in snap["rows"]}
+    matrix = ["# CCSDS Turbo 点位完成矩阵", "", f"更新时间：`{snap['generated_at']}`", "",
+              "`*` = 本轮终止条件已满足；`·` = AFF3CT 后已有有效数据但仍在追加；`—` = 暂无有效数据。", "",
+              "| SNR (dB) | K=1784, R=1/2 | K=1784, R=1/3 | K=8920, R=1/2 | K=8920, R=1/3 |",
+              "|---:|:---:|:---:|:---:|:---:|"]
+    for snr in all_snrs:
+        cells = []
+        for cfg in columns:
+            r = row_map.get((cfg[0], cfg[1], snr))
+            if not r or not r["source"] or r["total_frames"] == 0:
+                cells.append("—")
+                continue
+            finished = (r["frame_errors"] >= 300 or r["total_frames"] >= 3_000_000)
+            cells.append("*" if finished else "·")
+        matrix.append(f"| {snr:.1f} | " + " | ".join(cells) + " |")
+    matrix_path.write_text("\n".join(matrix) + "\n", encoding="utf-8")
     lines += ["", "## 主机进度（完整分片）", "",
               "目标帧数只作为当前运行的上限参考；达到 300 个错误帧后可能提前停止，因此完成度不是任务成功判据。", "",
               "| 数据源 | 配置 | 已采样帧 | 目标帧上限 | 上限完成度 | 各 Eb/N0 帧数 |", "|:---|:---|---:|---:|---:|:---|"]
