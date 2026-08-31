@@ -115,7 +115,7 @@ static const char* DECODER_NAMES[] = {
     "Hard Viterbi (CC R=1/2)",
     "Soft Viterbi (CC R=1/2)",
     "BCJR / MAP (CC R=1/2)",
-    "Turbo (PCCC R=1/3)"
+    "Turbo (PCCC)"
 };
 
 #endif // CONFIG_H_

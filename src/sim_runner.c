@@ -30,33 +30,46 @@ void print_sim_header(DecoderType decoder, SimConfig* cfg) {
     const char* decoder_name = DECODER_NAMES[decoder];
     
     int block_size;
-    double code_rate;
+    double nominal_rate;
+    double effective_rate;
+    int codeword_size;
     const char* turbo_variant = "";
     
     if (decoder == DECODER_TURBO) {
         if (g_turbo_type == TURBO_TYPE_CCSDS) {
             block_size = g_ccsds_k;
             turbo_variant = " (CCSDS)";
+            nominal_rate = ccsds_get_nominal_rate();
+            effective_rate = ccsds_get_effective_rate();
+            codeword_size = ccsds_get_codeword_length();
         } else {
             block_size = TURBO_MESSAGE_BITS;
             turbo_variant = " ((7,5)_8)";
+            nominal_rate = 1.0 / 3.0;
+            effective_rate = (double)TURBO_MESSAGE_BITS / (double)TURBO_codeword_length;
+            codeword_size = TURBO_codeword_length;
         }
-        code_rate = 1.0 / 3.0;
     } else if (decoder == DECODER_UNCODED) {
         block_size = CC_MESSAGE_BITS;
-        code_rate = 1.0;
+        nominal_rate = 1.0;
+        effective_rate = 1.0;
+        codeword_size = CC_MESSAGE_BITS;
     } else {
         block_size = CC_MESSAGE_BITS;
-        code_rate = 0.5;
+        nominal_rate = 0.5;
+        effective_rate = (double)CC_MESSAGE_BITS / (double)CC_codeword_length;
+        codeword_size = CC_codeword_length;
     }
     
     printf("\n");
     printf("+============================================================+\n");
     printf("|          Channel Coding Simulation System v2.0             |\n");
     printf("+============================================================+\n");
-    printf("| Decoder:     %-44s |\n", decoder_name);
+    printf("| Decoder:     %-34s%-10s |\n", decoder_name, turbo_variant);
     printf("| Block Size:  %-4d bits                                     |\n", block_size);
-    printf("| Code Rate:   %-6.4f                                       |\n", code_rate);
+    printf("| Nominal Rate:%-10.8f  Effective Rate: %-10.8f       |\n",
+           nominal_rate, effective_rate);
+    printf("| Codeword:    %-6d transmitted bits                         |\n", codeword_size);
     printf("| SNR Range:   %.1f ~ %.1f dB (step=%.1f)                       |\n", 
            cfg->start_snr, cfg->end_snr, cfg->snr_step);
     printf("| Frames/SNR:  %-8ld                                      |\n", cfg->num_frames);
@@ -84,7 +97,6 @@ void print_result_table_footer(void) {
 // =================================================================
 
 void run_uncoded_simulation(SimConfig* cfg, FILE* csv_fp) {
-    double code_rate = 1.0; // Uncoded, R=1
     int block_size = CC_MESSAGE_BITS;
     
     long int bit_error, frame_error, seq;
@@ -239,7 +251,7 @@ extern void turbo_decoder_wrapper(void);
 extern long int turbo_check_errors(void);
 
 void run_turbo_simulation_v2(SimConfig* cfg, FILE* csv_fp) {
-    double code_rate = (double)TURBO_MESSAGE_BITS / (double)(TURBO_MESSAGE_BITS * 3);
+    double code_rate = (double)TURBO_MESSAGE_BITS / (double)TURBO_codeword_length;
     
     long int bit_error, frame_error, seq;
     double BER, FER;
@@ -315,21 +327,35 @@ void run_turbo_simulation_v2(SimConfig* cfg, FILE* csv_fp) {
 
 void run_simulation(DecoderType decoder, SimConfig* cfg) {
     // 确定码率和帧长
-    double code_rate;
+    double nominal_rate;
+    double effective_rate;
     int block_size;
+    int codeword_size;
     
     switch (decoder) {
         case DECODER_UNCODED:
-            code_rate = 1.0;
+            nominal_rate = 1.0;
+            effective_rate = 1.0;
             block_size = CC_MESSAGE_BITS;
+            codeword_size = CC_MESSAGE_BITS;
             break;
         case DECODER_TURBO:
-            code_rate = 1.0 / 3.0;
             block_size = (g_turbo_type == TURBO_TYPE_CCSDS) ? g_ccsds_k : TURBO_MESSAGE_BITS;
+            if (g_turbo_type == TURBO_TYPE_CCSDS) {
+                nominal_rate = ccsds_get_nominal_rate();
+                effective_rate = ccsds_get_effective_rate();
+                codeword_size = ccsds_get_codeword_length();
+            } else {
+                nominal_rate = 1.0 / 3.0;
+                effective_rate = (double)TURBO_MESSAGE_BITS / (double)TURBO_codeword_length;
+                codeword_size = TURBO_codeword_length;
+            }
             break;
         default:
-            code_rate = 0.5;
+            nominal_rate = 0.5;
+            effective_rate = (double)CC_MESSAGE_BITS / (double)CC_codeword_length;
             block_size = CC_MESSAGE_BITS;
+            codeword_size = CC_codeword_length;
             break;
     }
     
@@ -342,7 +368,8 @@ void run_simulation(DecoderType decoder, SimConfig* cfg) {
     print_sim_header(decoder, cfg);
     
     // 打开 CSV 文件
-    FILE* csv_fp = csv_init(cfg->csv_filename, DECODER_NAMES[decoder], code_rate, block_size);
+    FILE* csv_fp = csv_init(cfg->csv_filename, DECODER_NAMES[decoder],
+                            nominal_rate, effective_rate, block_size, codeword_size);
     if (!csv_fp) {
         fprintf(stderr, "[错误] 无法创建 CSV 文件，继续仿真但不保存数据...\n");
     }

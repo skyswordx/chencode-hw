@@ -7,12 +7,15 @@
  * @brief 初始化 CSV 文件，写入元数据和表头
  * @param filename 文件路径
  * @param decoder_name 译码器名称
- * @param code_rate 码率
+ * @param nominal_code_rate 标称码率
+ * @param effective_code_rate 有效码率（信息位数/实际发送位数）
  * @param block_size 帧长
+ * @param codeword_size 实际发送码字长度
  * @return FILE* 文件指针，失败返回 NULL
  */
 FILE* csv_init(const char* filename, const char* decoder_name, 
-               double code_rate, int block_size);
+               double nominal_code_rate, double effective_code_rate,
+               int block_size, int codeword_size);
 
 /**
  * @brief 追加一行 BER 数据到 CSV

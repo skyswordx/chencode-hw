@@ -19,7 +19,8 @@ static void ensure_output_dir() {
 }
 
 FILE* csv_init(const char* filename, const char* decoder_name,
-               double code_rate, int block_size) {
+               double nominal_code_rate, double effective_code_rate,
+               int block_size, int codeword_size) {
     ensure_output_dir();
     
     FILE* fp = fopen(filename, "w");
@@ -36,8 +37,10 @@ FILE* csv_init(const char* filename, const char* decoder_name,
     fprintf(fp, "# Channel Coding Simulation Results\n");
     fprintf(fp, "# ============================================\n");
     fprintf(fp, "# Decoder: %s\n", decoder_name);
-    fprintf(fp, "# Code Rate: %.4f\n", code_rate);
+    fprintf(fp, "# Nominal Code Rate: %.8f\n", nominal_code_rate);
+    fprintf(fp, "# Effective Code Rate: %.8f\n", effective_code_rate);
     fprintf(fp, "# Block Size: %d bits\n", block_size);
+    fprintf(fp, "# Codeword Size: %d transmitted bits\n", codeword_size);
     fprintf(fp, "# Generated: %04d-%02d-%02d %02d:%02d:%02d\n",
             t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
             t->tm_hour, t->tm_min, t->tm_sec);

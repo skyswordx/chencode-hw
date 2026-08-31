@@ -2,7 +2,7 @@
  * @file ccsds_turbo.h
  * @brief CCSDS 131.0-B-5 Turbo Code Implementation (NASA Standard)
  * 
- * 16-state RSC encoder with K=1784, Rate 1/3
+ * 16-state RSC encoder with dynamic K and CCSDS nominal rates
  * Polynomials: G0=10011 (feedback), G1=11011 (feedforward)
  */
 
@@ -22,8 +22,20 @@
  */
 void ccsds_turbo_init(void);
 
+/** Return the configured nominal code rate (for example, 1/2). */
+double ccsds_get_nominal_rate(void);
+
+/** Return the exact transmitted codeword length n=(K+4)/r. */
+int ccsds_get_codeword_length(void);
+
+/** Return the true finite-block rate K/n used for Eb/N0 normalization. */
+double ccsds_get_effective_rate(void);
+
+/** Run deterministic RSC, puncturing, and noiseless round-trip checks. */
+int ccsds_turbo_self_test(void);
+
 /**
- * @brief CCSDS Turbo 编码器 (16-state RSC, R=1/3)
+ * @brief CCSDS Turbo 编码器 (16-state RSC, R=1/2 or R=1/3)
  */
 void ccsds_turbo_encoder(void);
 

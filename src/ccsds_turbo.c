@@ -25,7 +25,7 @@ CcsdsCodeRate g_ccsds_rate = CCSDS_RATE_1_3;  // 默认 R=1/3 (无打孔)
 
 // 运行时计算的派生值
 static int ccsds_message_length;   // K + 4
-static int ccsds_codeword_length;  // 依赖码率: R=1/3 为 K*3+16, R=1/2 为 K*2+8
+static int ccsds_codeword_length;  // 标准规定 n=(K+4)/r
 
 // =================================================================
 // --- CCSDS 全局数组 (使用最大尺寸静态分配) ---
@@ -75,6 +75,29 @@ static const CcsdsKParams CCSDS_K_TABLE[] = {
 };
 #define CCSDS_K_TABLE_SIZE (sizeof(CCSDS_K_TABLE) / sizeof(CCSDS_K_TABLE[0]))
 
+double ccsds_get_nominal_rate(void) {
+    switch (g_ccsds_rate) {
+        case CCSDS_RATE_1_2: return 1.0 / 2.0;
+        case CCSDS_RATE_1_4: return 1.0 / 4.0;
+        case CCSDS_RATE_1_3:
+        default:             return 1.0 / 3.0;
+    }
+}
+
+int ccsds_get_codeword_length(void) {
+    int symbol_count = g_ccsds_k + CCSDS_STATE_MEM;
+    switch (g_ccsds_rate) {
+        case CCSDS_RATE_1_2: return symbol_count * 2;
+        case CCSDS_RATE_1_4: return symbol_count * 4;
+        case CCSDS_RATE_1_3:
+        default:             return symbol_count * 3;
+    }
+}
+
+double ccsds_get_effective_rate(void) {
+    return (double)g_ccsds_k / (double)ccsds_get_codeword_length();
+}
+
 /**
  * @brief 获取 K 对应的 k1, k2 参数
  */
@@ -103,7 +126,7 @@ int ccsds_set_block_size(int k) {
     
     g_ccsds_k = k;
     ccsds_message_length = k + CCSDS_STATE_MEM;
-    ccsds_codeword_length = k * 3 + CCSDS_STATE_MEM * 4;
+    ccsds_codeword_length = ccsds_get_codeword_length();
     
     printf("[CCSDS] Block size set: K=%d (k1=%d, k2=%d)\n", k, k1, k2);
     return 1;
@@ -128,7 +151,7 @@ void ccsds_turbo_init(void) {
     
     // 更新派生值
     ccsds_message_length = K + CCSDS_STATE_MEM;
-    ccsds_codeword_length = K * 3 + CCSDS_STATE_MEM * 4;
+    ccsds_codeword_length = ccsds_get_codeword_length();
     
     if (!ccsds_get_k_params(K, &k1, &k2)) {
         fprintf(stderr, "[CCSDS] Error: Cannot initialize interleaver for K=%d\n", K);
@@ -176,20 +199,6 @@ void ccsds_turbo_init(void) {
 }
 
 /**
- * @brief 比特交织
- */
-static void ccsds_interleave_bits(int* in, int* out) {
-    int K = g_ccsds_k;
-    for (int i = 0; i < K; i++) {
-        out[i] = in[ccsds_interleaver[i]];
-    }
-    // 尾比特不交织
-    for (int i = K; i < ccsds_message_length; i++) {
-        out[i] = in[i];
-    }
-}
-
-/**
  * @brief LLR 交织
  */
 static void ccsds_interleave_llr(double* in, double* out) {
@@ -220,11 +229,12 @@ static void ccsds_deinterleave_llr(double* in, double* out) {
 // =================================================================
 // CCSDS Polynomials:
 // G0 = 10011 (binary) = 1 + D + D^4 (feedback)
-// G1 = 11011 (binary) = 1 + D + D^2 + D^4 (feedforward)
+// G1 = 11011 (binary) = 1 + D + D^3 + D^4 (feedforward)
 //
-// State: s = (s0, s1, s2, s3) where s0 is D, s1 is D^2, s2 is D^3, s3 is D^4
-// Feedback: f = u ⊕ s0 ⊕ s3   (from G0 = 1 + D + D^4)
-// Parity:   c = f ⊕ s0 ⊕ s1 ⊕ s3  (from G1 = 1 + D + D^2 + D^4)
+// State: s0 is the newest bit and s3 is the oldest bit in the 4-stage register.
+// With this state orientation, the CCSDS/AFF3CT connection vectors map to:
+// Feedback: f = u ⊕ s2 ⊕ s3   (G0 = 10011, denominator)
+// Parity:   c = f ⊕ s0 ⊕ s2 ⊕ s3  (G1 = 11011, numerator)
 // State update: s3=s2, s2=s1, s1=s0, s0=f
 
 /**
@@ -234,23 +244,24 @@ static void ccsds_deinterleave_llr(double* in, double* out) {
  * @brief CCSDS 16-state 分量 RSC 编码器 (带终止功能)
  * 
  * @param input_msg 输入位数组 (长度 K)
- * @param output_parity 输出校验位数组 (长度 K)
- * @param output_tail_sys 输出的终止系统位 (长度 4) - 即 switch bits
- * @param output_tail_par 输出的终止校验位 (长度 4)
+ * @param output_systematic 输出系统位数组 (长度 K+4)
+ * @param output_parity 输出校验位数组 (长度 K+4)
  * @param length 输入长度 K
  */
-static void ccsds_component_rsc_encoder(int* input_msg, int* output_parity, 
-                                        int* output_tail_sys, int* output_tail_par, 
+static void ccsds_component_rsc_encoder(const int* input_msg,
+                                        int* output_systematic,
+                                        int* output_parity,
                                         int length) {
     int s0 = 0, s1 = 0, s2 = 0, s3 = 0;  // 4-bit state register
     
     // 1. 正常编码阶段
     for (int i = 0; i < length; i++) {
-        // Feedback: f = u ⊕ s0 ⊕ s3
-        int f = input_msg[i] ^ s0 ^ s3;
+        output_systematic[i] = input_msg[i];
+        // Feedback: f = u ⊕ s2 ⊕ s3 (CCSDS/AFF3CT register orientation)
+        int f = input_msg[i] ^ s2 ^ s3;
         
-        // Parity: c = f ⊕ s0 ⊕ s1 ⊕ s3
-        output_parity[i] = f ^ s0 ^ s1 ^ s3;
+        // Parity: c = f ⊕ s0 ⊕ s2 ⊕ s3
+        output_parity[i] = f ^ s0 ^ s2 ^ s3;
         
         // State update
         s3 = s2;
@@ -261,20 +272,20 @@ static void ccsds_component_rsc_encoder(int* input_msg, int* output_parity,
 
     // 2. 终止阶段 (Termination) - 4 steps
     // 目标: 使寄存器归零。
-    // 对于反馈结构，令输入 u = s0 ⊕ s3，则反馈 f = (s0 ⊕ s3) ⊕ s0 ⊕ s3 = 0
+    // 对于反馈结构，令输入 u = s2 ⊕ s3，则反馈 f = 0。
     // 这样移入的就是 0，4次后状态全0。
     // 此时产生的 u 即为 "Switch Bits" (Tail Systematic Bits)
     for (int i = 0; i < CCSDS_STATE_MEM; i++) {
         // 计算 switch bit，使得 f = 0
-        // f = u ^ s0 ^ s3  => 令 f=0 => u = s0 ^ s3
-        int u_switch = s0 ^ s3;
+        // f = u ^ s2 ^ s3  => 令 f=0 => u = s2 ^ s3
+        int u_switch = s2 ^ s3;
         int f = 0; // By definition
 
         // 保存 Switch Bit (作为 systematic tail)
-        output_tail_sys[i] = u_switch;
+        output_systematic[length + i] = u_switch;
 
-        // Parity: c = f ⊕ s0 ⊕ s1 ⊕ s3  (注意 f=0)
-        output_tail_par[i] = 0 ^ s0 ^ s1 ^ s3;
+        // Parity: c = f ⊕ s0 ⊕ s2 ⊕ s3  (f=0)
+        output_parity[length + i] = s0 ^ s2 ^ s3;
 
         // State update
         s3 = s2;
@@ -282,6 +293,33 @@ static void ccsds_component_rsc_encoder(int* input_msg, int* output_parity,
         s1 = s0;
         s0 = f; // 0
     }
+}
+
+/** Build the CCSDS codeword by applying the standard multiplexer/puncturer. */
+static int ccsds_multiplex_codeword(const int* systematic_a,
+                                    const int* parity_a,
+                                    const int* parity_b,
+                                    int symbol_count,
+                                    CcsdsCodeRate rate,
+                                    int* output) {
+    int out = 0;
+
+    if (rate == CCSDS_RATE_1_2) {
+        /* CCSDS 131.0-B-5 6.3j: (out0a,out1a,out0a,out1b), repeated. */
+        for (int t = 0; t < symbol_count; t++) {
+            output[out++] = systematic_a[t];
+            output[out++] = (t % 2 == 0) ? parity_a[t] : parity_b[t];
+        }
+    } else {
+        /* R=1/3: (out0a,out1a,out1b), repeated for all K+4 bit times. */
+        for (int t = 0; t < symbol_count; t++) {
+            output[out++] = systematic_a[t];
+            output[out++] = parity_a[t];
+            output[out++] = parity_b[t];
+        }
+    }
+
+    return out;
 }
 
 /**
@@ -294,15 +332,10 @@ void ccsds_turbo_encoder(void) {
     int K = g_ccsds_k;
     static int interleaved_msg[CCSDS_K_MAX]; // 仅存 K 位
     
-    // Parity arrays for DATA part (length K)
-    static int parity1[CCSDS_K_MAX];
-    static int parity2[CCSDS_K_MAX];
-    
-    // Tail bits (Systematic & Parity) for both encoders
-    static int tail_sys1[CCSDS_STATE_MEM];
-    static int tail_par1[CCSDS_STATE_MEM];
-    static int tail_sys2[CCSDS_STATE_MEM];
-    static int tail_par2[CCSDS_STATE_MEM];
+    static int systematic1[CCSDS_message_length_max];
+    static int systematic2[CCSDS_message_length_max];
+    static int parity1[CCSDS_message_length_max];
+    static int parity2[CCSDS_message_length_max];
 
     
     // 1. 交织 (仅对 K 个信息位进行)
@@ -314,60 +347,15 @@ void ccsds_turbo_encoder(void) {
     }
     
     // 2. 编码器 1 
-    ccsds_component_rsc_encoder(ccsds_message_padded, parity1, tail_sys1, tail_par1, K);
+    ccsds_component_rsc_encoder(ccsds_message_padded, systematic1, parity1, K);
     
     // 3. 编码器 2 
-    ccsds_component_rsc_encoder(interleaved_msg, parity2, tail_sys2, tail_par2, K);
+    ccsds_component_rsc_encoder(interleaved_msg, systematic2, parity2, K);
     
     // 4. 码字复用 (Multiplexing)
-    int k = 0;
-    
-    if (g_ccsds_rate == CCSDS_RATE_1_2) {
-        // === R=1/2 打孔模式 ===
-        // DATA Part:
-        for (int i = 0; i < K; i++) {
-            ccsds_codeword[k++] = ccsds_message_padded[i]; // u
-            if (i % 2 == 0) {
-                ccsds_codeword[k++] = parity1[i]; // Even: P1
-            } else {
-                ccsds_codeword[k++] = parity2[i]; // Odd: P2
-            }
-        }
-        
-        // TAIL Part (Modified: Full 16-bit tail like R=1/3 for better decoding)
-        // Send all termination bits from both encoders (4*2 + 4*2 = 16 bits)
-        // This sacrifices strict 1/2 rate in tail for reliable Dec2 termination
-        for (int i = 0; i < 4; i++) {
-            ccsds_codeword[k++] = tail_sys1[i];
-            ccsds_codeword[k++] = tail_par1[i];
-        }
-        for (int i = 0; i < 4; i++) {
-            ccsds_codeword[k++] = tail_sys2[i];
-            ccsds_codeword[k++] = tail_par2[i];
-        }
-
-    } else {
-        // === R=1/3 无打孔模式 ===
-        // DATA Part:
-        for (int i = 0; i < K; i++) {
-            ccsds_codeword[k++] = ccsds_message_padded[i]; // u
-            ccsds_codeword[k++] = parity1[i];              // p1
-            ccsds_codeword[k++] = parity2[i];              // p2
-        }
-        
-        // TAIL Part (Full Tail):
-        // Send all termination bits from both encoders (4*2 + 4*2 = 16 bits)
-        // Seq: (t1, p1) block followed by (t2, p2) block
-        
-         for (int i = 0; i < 4; i++) {
-            ccsds_codeword[k++] = tail_sys1[i];
-            ccsds_codeword[k++] = tail_par1[i];
-        }
-         for (int i = 0; i < 4; i++) {
-            ccsds_codeword[k++] = tail_sys2[i];
-            ccsds_codeword[k++] = tail_par2[i];
-        }
-    }
+    int k = ccsds_multiplex_codeword(systematic1, parity1, parity2,
+                                     ccsds_message_length, g_ccsds_rate,
+                                     ccsds_codeword);
     
     // 更新实际码字长度
     ccsds_codeword_length = k;
@@ -457,11 +445,11 @@ static void ccsds_init_trellis(void) {
             int s2 = (state >> 2) & 1;
             int s3 = (state >> 3) & 1;
             
-            // Feedback: f = u ⊕ s0 ⊕ s3
-            int f = input ^ s0 ^ s3;
+            // Feedback: f = u ⊕ s2 ⊕ s3 (same orientation as the encoder)
+            int f = input ^ s2 ^ s3;
             
-            // Parity: c = f ⊕ s0 ⊕ s1 ⊕ s3
-            int parity = f ^ s0 ^ s1 ^ s3;
+            // G1=11011: c = f ⊕ s0 ⊕ s2 ⊕ s3
+            int parity = f ^ s0 ^ s2 ^ s3;
             
             // Next state: shift in f
             int next_state = ((s2 << 3) | (s1 << 2) | (s0 << 1) | f) & 0xF;
@@ -606,60 +594,29 @@ void ccsds_turbo_decoder(void) {
     int msg_len = ccsds_message_length;
     double Lc_factor = 4.0 / N0;
     
-    // 临时存储 Dec1 和 Dec2 的尾部输入 LLR
-    // 每个 decoder 看到的输入是 length K+4
-    // Dec1: [Sys_u(0..K-1), Tail1(0..3)]
-    // Dec2: [Sys_int(0..K-1), Tail2(0..3)]
-    double tail1_sys[4], tail1_par[4];
-    double tail2_sys[4], tail2_par[4];
-
     // 1. 读取信道 LLR
     int k = 0;
-    
-    // A. 读取数据部分 (前 K 组)
-    if (g_ccsds_rate == CCSDS_RATE_1_2) {
-        for (int i = 0; i < K; i++) {
-            ccsds_Lc_sys[i] = Lc_factor * ccsds_rx_symbol[k++][0];
-            double parity_llr = Lc_factor * ccsds_rx_symbol[k++][0];
-            if (i % 2 == 0) { // Odd s, P1 transmitted
-                ccsds_Lc_par1[i] = parity_llr;
-                ccsds_Lc_par2[i] = 0.0;
-            } else { // Even s, P2 transmitted
-                ccsds_Lc_par1[i] = 0.0;
-                ccsds_Lc_par2[i] = parity_llr;
-            }
-        }
-    } else {
-        // R=1/3
-        for (int i = 0; i < K; i++) {
-            ccsds_Lc_sys[i]  = Lc_factor * ccsds_rx_symbol[k++][0];
-            ccsds_Lc_par1[i] = Lc_factor * ccsds_rx_symbol[k++][0];
-            ccsds_Lc_par2[i] = Lc_factor * ccsds_rx_symbol[k++][0];
-        }
+
+    /* Start every absent (punctured) observation as an erasure. */
+    for (int i = 0; i < msg_len; i++) {
+        ccsds_Lc_sys[i] = 0.0;
+        ccsds_Lc_par1[i] = 0.0;
+        ccsds_Lc_par2[i] = 0.0;
     }
-    
-    // B. 读取 Tail 部分
+
     if (g_ccsds_rate == CCSDS_RATE_1_2) {
-        // === R=1/2 Full Tail (Modified: 16 bits like R=1/3) ===
-        // Both encoders' termination bits are sent for reliable decoding
-        for (int i = 0; i < 4; i++) {
-            tail1_sys[i] = Lc_factor * ccsds_rx_symbol[k++][0];
-            tail1_par[i] = Lc_factor * ccsds_rx_symbol[k++][0];
-        }
-        for (int i = 0; i < 4; i++) {
-            tail2_sys[i] = Lc_factor * ccsds_rx_symbol[k++][0];
-            tail2_par[i] = Lc_factor * ccsds_rx_symbol[k++][0];
+        /* Same alternating puncturing phase is used through all four tail times. */
+        for (int t = 0; t < msg_len; t++) {
+            ccsds_Lc_sys[t] = Lc_factor * ccsds_rx_symbol[k++][0];
+            double parity_llr = Lc_factor * ccsds_rx_symbol[k++][0];
+            if (t % 2 == 0) ccsds_Lc_par1[t] = parity_llr;
+            else            ccsds_Lc_par2[t] = parity_llr;
         }
     } else {
-        // === R=1/3 Full Tail (16 bits) ===
-        // Encoder logic: (t1, p1) x 4, (t2, p2) x 4
-        for (int i = 0; i < 4; i++) {
-            tail1_sys[i] = Lc_factor * ccsds_rx_symbol[k++][0];
-            tail1_par[i] = Lc_factor * ccsds_rx_symbol[k++][0];
-        }
-        for (int i = 0; i < 4; i++) {
-            tail2_sys[i] = Lc_factor * ccsds_rx_symbol[k++][0];
-            tail2_par[i] = Lc_factor * ccsds_rx_symbol[k++][0];
+        for (int t = 0; t < msg_len; t++) {
+            ccsds_Lc_sys[t]  = Lc_factor * ccsds_rx_symbol[k++][0];
+            ccsds_Lc_par1[t] = Lc_factor * ccsds_rx_symbol[k++][0];
+            ccsds_Lc_par2[t] = Lc_factor * ccsds_rx_symbol[k++][0];
         }
     }
 
@@ -669,24 +626,8 @@ void ccsds_turbo_decoder(void) {
         ccsds_La_1_to_2[i] = 0.0;
     }
     
-    // 3. 准备 Dec1 的输入 (拼接 Sys 和 Par)
-    // ccsds_Lc_sys[] 已经存了前 K 个
-    // 我们需要把 tail1 拼接到 ccsds_Lc_sys 和 ccsds_Lc_par1 的末尾
-    // 注意: ccsds_Lc_sys 实际上是 global array size Max. We can direct write.
-    for(int i=0; i<4; i++) {
-        ccsds_Lc_sys[K+i] = tail1_sys[i];
-        ccsds_Lc_par1[K+i] = tail1_par[i];
-    }
-    
-    // Lc_sys_for_dec2: 需要包含 [interleaved(u), tail2]
+    // Dec2 sees interleaved data systematics; its four switch bits are not transmitted.
     static double Lc_sys_for_dec2[CCSDS_message_length_max];
-    static double Lc_par_for_dec2[CCSDS_message_length_max];
-
-    // 初始化 Lc_par_for_dec2 (前K个来自 ccsds_Lc_par2, 后面来自 tail2)
-    for(int i=0; i<K; i++) Lc_par_for_dec2[i] = ccsds_Lc_par2[i];
-    for(int i=0; i<4; i++) Lc_par_for_dec2[K+i] = tail2_par[i];
-    for(int i=0; i<4; i++) Lc_sys_for_dec2[K+i] = tail2_sys[i];
-
     
     // 4. 迭代译码
     for (int iter = 0; iter < CCSDS_ITERATIONS; iter++) {
@@ -704,22 +645,125 @@ void ccsds_turbo_decoder(void) {
         // --- DEC 2 ---
         // 准备 DEC2 的系统位输入: Interleaved(Sys[0..K-1]) + Tail2
         ccsds_interleave_llr(ccsds_Lc_sys, Lc_sys_for_dec2); 
-        // 修正 tail (因为 interleave_llr 会把 Sys[K..K+3] 即 Tail1 拷贝过去，这是不对的)
-        for(int i=0; i<4; i++) Lc_sys_for_dec2[K+i] = tail2_sys[i];
+        for(int i=0; i<4; i++) Lc_sys_for_dec2[K+i] = 0.0;
         
         for(int i=0; i<4; i++) ccsds_La_1_to_2[K+i] = 0.0;
 
-        ccsds_log_map_decoder(Lc_sys_for_dec2, Lc_par_for_dec2, ccsds_La_1_to_2, ccsds_Le_2);
+        ccsds_log_map_decoder(Lc_sys_for_dec2, ccsds_Lc_par2, ccsds_La_1_to_2, ccsds_Le_2);
         
         // 解交织外在信息: Le_2[0..K-1] -> La_2_to_1[0..K-1]
         ccsds_deinterleave_llr(ccsds_Le_2, ccsds_La_2_to_1);
     }
     
-    // 5. 最终判决 (DEC1 视角)
+    /* Final APP comes from the last decoder that ran, then returns to original order. */
     for (int i = 0; i < K; i++) {
-        ccsds_L_APP[i] = ccsds_Lc_sys[i] + ccsds_La_2_to_1[i] + ccsds_Le_1[i];
-        ccsds_de_message[i] = (ccsds_L_APP[i] > 0.0) ? 0 : 1;
+        ccsds_L_APP[i] = Lc_sys_for_dec2[i] + ccsds_La_1_to_2[i] + ccsds_Le_2[i];
     }
+    for (int i = 0; i < K; i++) {
+        double app = ccsds_L_APP[ccsds_deinterleaver[i]];
+        ccsds_de_message[i] = (app > 0.0) ? 0 : 1;
+    }
+}
+
+int ccsds_turbo_self_test(void) {
+    static const int input[] = {1,0,1,1,0,0,1,0,1,0,1,1};
+    static const int expected_parity[] = {1,1,1,0,0,1,0,0,0,1,0,1,1,1,1,1};
+    static const int expected_systematic[] = {1,0,1,1,0,0,1,0,1,0,1,1,0,1,1,1};
+    int systematic[16], parity[16];
+    int ok = 1;
+
+    ccsds_component_rsc_encoder(input, systematic, parity, 12);
+    if (memcmp(systematic, expected_systematic, sizeof(systematic)) != 0 ||
+        memcmp(parity, expected_parity, sizeof(parity)) != 0) {
+        fprintf(stderr, "[CCSDS SELF-TEST] FAIL: fixed RSC parity/tail vector\n");
+        ok = 0;
+    } else {
+        printf("[CCSDS SELF-TEST] PASS: fixed RSC parity/tail vector\n");
+    }
+
+    {
+        static const int sys[] = {1,0,1,1,1,0,0,1};
+        static const int pa[]  = {0,1,1,0,1,0,1,0};
+        static const int pb[]  = {1,1,0,0,0,1,0,1};
+        static const int expected[] = {1,0,0,1,1,1,1,0,1,1,0,1,0,1,1,1};
+        int muxed[16];
+        int length = ccsds_multiplex_codeword(sys, pa, pb, 8,
+                                              CCSDS_RATE_1_2, muxed);
+        if (length != 16 || memcmp(muxed, expected, sizeof(expected)) != 0) {
+            fprintf(stderr, "[CCSDS SELF-TEST] FAIL: R=1/2 puncturing phase/tail\n");
+            ok = 0;
+        } else {
+            printf("[CCSDS SELF-TEST] PASS: R=1/2 puncturing phase/tail\n");
+        }
+    }
+
+    {
+        int saved_k = g_ccsds_k;
+        CcsdsCodeRate saved_rate = g_ccsds_rate;
+        double saved_n0 = N0;
+        double saved_sgm = sgm;
+
+        g_ccsds_k = CCSDS_K_1784;
+        g_ccsds_rate = CCSDS_RATE_1_2;
+        ccsds_init_trellis();
+        ccsds_turbo_init();
+        for (int i = 0; i < g_ccsds_k; i++) {
+            int bit = ((i * 13 + i / 7 + 3) % 17) < 8;
+            ccsds_message[i] = bit;
+            ccsds_message_padded[i] = bit;
+        }
+        ccsds_turbo_encoder();
+        if (ccsds_codeword_length != 2 * (g_ccsds_k + CCSDS_STATE_MEM)) {
+            fprintf(stderr, "[CCSDS SELF-TEST] FAIL: codeword length %d (expected 3576)\n",
+                    ccsds_codeword_length);
+            ok = 0;
+        }
+        ccsds_turbo_modulation();
+        for (int i = 0; i < ccsds_codeword_length; i++) {
+            ccsds_rx_symbol[i][0] = ccsds_tx_symbol[i][0];
+            ccsds_rx_symbol[i][1] = 0.0;
+        }
+        N0 = 0.25;
+        sgm = sqrt(N0 / 2.0);
+        ccsds_turbo_decoder();
+        if (ccsds_turbo_check_errors() != 0) {
+            fprintf(stderr, "[CCSDS SELF-TEST] FAIL: noiseless R=1/2 round trip\n");
+            ok = 0;
+        } else {
+            printf("[CCSDS SELF-TEST] PASS: n=3576 and noiseless R=1/2 round trip\n");
+        }
+
+        /* The polynomial/tail fix is shared by R=1/3, so guard that path too. */
+        g_ccsds_rate = CCSDS_RATE_1_3;
+        ccsds_turbo_init();
+        ccsds_turbo_encoder();
+        if (ccsds_codeword_length != 3 * (g_ccsds_k + CCSDS_STATE_MEM)) {
+            fprintf(stderr, "[CCSDS SELF-TEST] FAIL: R=1/3 codeword length %d (expected 5364)\n",
+                    ccsds_codeword_length);
+            ok = 0;
+        }
+        ccsds_turbo_modulation();
+        for (int i = 0; i < ccsds_codeword_length; i++) {
+            ccsds_rx_symbol[i][0] = ccsds_tx_symbol[i][0];
+            ccsds_rx_symbol[i][1] = 0.0;
+        }
+        ccsds_turbo_decoder();
+        if (ccsds_turbo_check_errors() != 0) {
+            fprintf(stderr, "[CCSDS SELF-TEST] FAIL: noiseless R=1/3 round trip\n");
+            ok = 0;
+        } else {
+            printf("[CCSDS SELF-TEST] PASS: n=5364 and noiseless R=1/3 round trip\n");
+        }
+
+        g_ccsds_k = saved_k;
+        g_ccsds_rate = saved_rate;
+        N0 = saved_n0;
+        sgm = saved_sgm;
+        ccsds_message_length = g_ccsds_k + CCSDS_STATE_MEM;
+        ccsds_codeword_length = ccsds_get_codeword_length();
+    }
+
+    return ok;
 }
 
 // =================================================================
@@ -728,16 +772,8 @@ void ccsds_turbo_decoder(void) {
 
 void run_ccsds_turbo_simulation(SimConfig* cfg, FILE* csv_fp) {
     int K = g_ccsds_k;
-    // double code_rate = (double)K / (double)(K * 3); // OLD: Hardcoded R=1/3
-    
-    // 修正: 根据实际配置的码率计算 N0
-    double nominal_rate;
-    if (g_ccsds_rate == CCSDS_RATE_1_2) {
-        nominal_rate = 0.5;
-    } else {
-        nominal_rate = 1.0/3.0;
-    }
-    double code_rate = nominal_rate; // Use nominal rate for Eb/N0 definition
+    double nominal_rate = ccsds_get_nominal_rate();
+    double code_rate = ccsds_get_effective_rate();
     
     long int bit_error, frame_error, seq;
     double BER, FER;
@@ -747,6 +783,8 @@ void run_ccsds_turbo_simulation(SimConfig* cfg, FILE* csv_fp) {
     // 初始化
     ccsds_init_trellis();
     ccsds_turbo_init();
+    printf("[CCSDS] Nominal rate %.8f, effective rate %.8f, codeword %d bits\n",
+           nominal_rate, code_rate, ccsds_get_codeword_length());
     
     printf("+----------+---------------+---------------+----------------+---------------+----------------+\n");
     printf("|  Eb/N0   |  Bit Errors   |  Total Bits   |      BER       | Frame Errors  |      FER       |\n");

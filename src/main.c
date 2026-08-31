@@ -23,6 +23,7 @@
 #include "config.h"
 #include "sim_runner.h"
 #include "csv_export.h"
+#include "ccsds_turbo.h"
 
 // =================================================================
 // --- Welcome Screen (Claude Code Style) ---
@@ -226,6 +227,7 @@ typedef struct {
     long frames;
     char output_file[256];
     unsigned int seed;      // Random seed (0 = use time)
+    int ccsds_self_test;    // Run deterministic CCSDS encoder/decoder checks
 } CLIArgs;
 
 void print_usage(const char* prog_name) {
@@ -242,6 +244,7 @@ void print_usage(const char* prog_name) {
     printf("  --output <file>     Output CSV file path\n");
     printf("  --seed <N>          Random seed (default: time-based)\n");
     printf("  --quiet             Suppress console output (for parallel execution)\n");
+    printf("  --ccsds-self-test   Run fixed-vector, puncturing, and noiseless checks\n");
     printf("\nExample:\n");
     printf("  %s --batch --decoder 4 --turbo-type 1 --ccsds-k 1784 --ccsds-rate 1 --snr 0.0 2.0 0.2 --frames 10000 --output r12_test.csv\n\n", prog_name);
 }
@@ -264,6 +267,9 @@ int parse_cli_args(int argc, char* argv[], CLIArgs* args) {
         }
         else if (strcmp(argv[i], "--quiet") == 0) {
             args->quiet_mode = 1;
+        }
+        else if (strcmp(argv[i], "--ccsds-self-test") == 0) {
+            args->ccsds_self_test = 1;
         }
         else if (strcmp(argv[i], "--decoder") == 0 && i + 1 < argc) {
             args->decoder = atoi(argv[++i]);
@@ -311,6 +317,11 @@ int main(int argc, char* argv[]) {
     // Parse command line arguments
     CLIArgs cli_args;
     int is_batch_mode = parse_cli_args(argc, argv, &cli_args);
+
+    if (cli_args.ccsds_self_test) {
+        srand(1);
+        return ccsds_turbo_self_test() ? 0 : 1;
+    }
     
     if (is_batch_mode) {
         // ===== BATCH MODE (for parallel execution) =====
@@ -348,6 +359,12 @@ int main(int argc, char* argv[]) {
                 extern CcsdsCodeRate g_ccsds_rate;
                 if (!ccsds_set_block_size(cli_args.ccsds_k)) {
                     fprintf(stderr, "[Error] Invalid CCSDS K: %d\n", cli_args.ccsds_k);
+                    return 1;
+                }
+                if (cli_args.ccsds_rate < CCSDS_RATE_1_3 ||
+                    cli_args.ccsds_rate > CCSDS_RATE_1_2) {
+                    fprintf(stderr, "[Error] Invalid CCSDS rate option: %d\n",
+                            cli_args.ccsds_rate);
                     return 1;
                 }
                 g_ccsds_rate = (CcsdsCodeRate)cli_args.ccsds_rate;
